@@ -1,0 +1,175 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Always dark — no light mode */
+    --background:         0 0% 4%;
+    --foreground:         0 0% 95%;
+
+    --card:               0 0% 7%;
+    --card-foreground:    0 0% 95%;
+
+    --popover:            0 0% 7%;
+    --popover-foreground: 0 0% 95%;
+
+    /* Primary = red accent */
+    --primary:            0 72% 51%;
+    --primary-foreground: 0 0% 98%;
+
+    /* Secondary / muted = dark grey */
+    --secondary:          0 0% 12%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted:              0 0% 11%;
+    --muted-foreground:   0 0% 53%;
+
+    /* Accent = hover surface */
+    --accent:             0 0% 11%;
+    --accent-foreground:  0 0% 95%;
+
+    --destructive:        0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border:             0 0% 12%;
+    --input:              0 0% 12%;
+    --ring:               0 72% 51%;
+
+    --radius:             0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    min-height: 100vh;
+  }
+
+  #root {
+    @apply flex flex-col min-h-screen;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { @apply bg-background; }
+  ::-webkit-scrollbar-thumb { @apply bg-border rounded; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(0 0% 20%); }
+
+  code, pre, .mono { @apply font-mono; }
+}
+
+@layer utilities {
+  .glow-red {
+    box-shadow: 0 0 24px rgba(220, 38, 38, 0.35);
+  }
+  .glow-red-lg {
+    box-shadow: 0 0 40px rgba(220, 38, 38, 0.4);
+  }
+  .text-shadow-red {
+    text-shadow: 0 0 20px rgba(220, 38, 38, 0.5);
+  }
+}
+
+/* ── Print-only elements (hidden on screen, shown in print) ─────────────── */
+[data-print-only] { display: none; }
+
+/* ── Print / PDF styles — full detailed report ───────────────────────────── */
+@media print {
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  @page { margin: 1.4cm 1.2cm; size: A4 portrait; }
+
+  /* Layout */
+  body  { background: #fff !important; color: #111 !important; margin: 0; padding: 0; font-size: 11pt; }
+  main  { max-width: 100% !important; padding: 0 !important; }
+
+  /* Show/hide */
+  header,
+  nav,
+  [data-print-hide]   { display: none !important; }
+  [data-print-show]   { display: block !important; }
+  [data-print-only]   { display: block !important; }
+
+  /* Remove all dark-mode visuals */
+  * { text-shadow: none !important; box-shadow: none !important; filter: none !important; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+
+  /* ── Colours ──────────────────────────────────────────────────────────── */
+  [class*="text-red"]    { color: #dc2626 !important; }
+  [class*="text-orange"] { color: #ea580c !important; }
+  [class*="text-yellow"] { color: #ca8a04 !important; }
+  [class*="text-green"]  { color: #16a34a !important; }
+  [class*="text-violet"] { color: #7c3aed !important; }
+  [class*="text-blue"]   { color: #2563eb !important; }
+  [class*="text-muted"]  { color: #555 !important; }
+  [class*="text-foreground"] { color: #111 !important; }
+
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  body, main, #root    { background: #fff !important; }
+  [class*="bg-card"],
+  [class*="bg-muted"]  { background: #f6f6f6 !important; }
+  [class*="bg-background"] { background: #fff !important; }
+  [class*="bg-red"]    { background: #fee2e2 !important; }
+  [class*="bg-orange"] { background: #ffedd5 !important; }
+  [class*="bg-yellow"] { background: #fefce8 !important; }
+  [class*="bg-green"]  { background: #f0fdf4 !important; }
+  [class*="bg-violet"] { background: #f5f3ff !important; }
+  [class*="bg-["]      { background: #f4f4f4 !important; }
+
+  /* ── Borders ──────────────────────────────────────────────────────────── */
+  [class*="border-red"]    { border-color: #fca5a5 !important; }
+  [class*="border-orange"] { border-color: #fdba74 !important; }
+  [class*="border-yellow"] { border-color: #fde047 !important; }
+  [class*="border-green"]  { border-color: #86efac !important; }
+  [class*="border-border"]  { border-color: #e5e7eb !important; }
+
+  /* ── Force all collapsible content open ───────────────────────────────── */
+  /* FindingCard body only (OccurrenceRow snippets intentionally stay closed) */
+  .print-expand {
+    display:      block   !important;
+    height:       auto    !important;
+    overflow:     visible !important;
+    break-before: avoid   !important;
+    page-break-before: avoid !important;
+  }
+
+  /* ── Finding card layout ──────────────────────────────────────────────── */
+  .mb-2\.5 {
+    margin-bottom:      12pt  !important;
+    break-inside:       avoid !important;
+    page-break-inside:  avoid !important;
+  }
+
+  /* Keep card header attached to its body — never orphan a header at page bottom */
+  .mb-2\.5 > div > button {
+    break-after:       avoid !important;
+    page-break-after:  avoid !important;
+  }
+
+  /* Keep exploit / remediation side-blocks and code blocks intact */
+  [class*="rounded-r-lg"] {
+    break-inside:      avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Badge colours for print */
+  [class*="badge"] { border: 1px solid currentColor !important; }
+
+  /* Code block */
+  [class*="bg-[#080808]"],
+  [class*="bg-[#0a0a0a]"] { background: #f4f4f4 !important; }
+  pre, code { background: #f4f4f4 !important; color: #111 !important; }
+
+  /* Links */
+  a { color: #2563eb !important; }
+
+  /* SVG gauge — render on first page alongside summary */
+  svg text { fill: #111 !important; }
+}
