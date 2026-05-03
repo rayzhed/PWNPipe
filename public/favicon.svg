@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Dark background -->
+  <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
+
+  <!-- Subtle red glow behind icon -->
+  <circle cx="16" cy="16" r="10" fill="#dc2626" opacity="0.10"/>
+
+  <!-- Git-merge icon (lucide paths, scaled 24→22 and centered) -->
+  <g transform="translate(5, 5) scale(0.916)" fill="none" stroke="#dc2626"
+     stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- Source branch node (top-left) -->
+    <circle cx="6" cy="6" r="3" fill="#dc2626" stroke="none"/>
+
+    <!-- Merge target node (bottom-right) -->
+    <circle cx="18" cy="18" r="3" fill="#dc2626" stroke="none"/>
+
+    <!-- Branch stem + merge curve -->
+    <path d="M6 21V9a9 9 0 0 0 9 9"/>
+  </g>
+</svg>
