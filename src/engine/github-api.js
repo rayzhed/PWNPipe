@@ -110,100 +110,6 @@ export async function getWorkflowContent(owner, repo, path, token) {
 }
 
 /**
- * Fetch a single optional file. Returns { content: null, rateLimit: null } on 404.
- * Returns { content: string, rateLimit }.
- */
-export async function getOptionalFileContent(owner, repo, path, token) {
-  const rawHeaders = {
-    Accept: 'application/vnd.github.raw+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-  };
-  if (token) rawHeaders.Authorization = `Bearer ${token}`;
-
-  const response = await fetch(
-    `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`,
-    { headers: rawHeaders }
-  );
-
-  const rateLimit = {
-    remaining: parseInt(response.headers.get('X-RateLimit-Remaining') ?? '-1', 10),
-    limit: parseInt(response.headers.get('X-RateLimit-Limit') ?? '-1', 10),
-    reset: parseInt(response.headers.get('X-RateLimit-Reset') ?? '0', 10),
-  };
-
-  if (response.status === 404) {
-    return { content: null, rateLimit: null };
-  }
-  if (!response.ok) {
-    const err = new Error(`Failed to fetch ${path}: ${response.status}`);
-    err.code = 'API_ERROR';
-    throw err;
-  }
-
-  const content = await response.text();
-  return { content, rateLimit };
-}
-
-/**
- * List every action.yml / action.yaml in the repo using the Git Trees API (one request,
- * full recursive traversal). Falls back to root + .github/actions/ scan if the tree is
- * truncated (repos > ~100k files).
- * Returns { files: [{name, path}], rateLimit }.
- */
-export async function listActionFiles(owner, repo, token) {
-  // Try Git Trees API first — single call, finds action.yml anywhere (monorepos included)
-  try {
-    const { data, rateLimit } = await ghFetch(
-      `${GITHUB_API}/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
-      token
-    );
-
-    if (!data.truncated && Array.isArray(data.tree)) {
-      const files = data.tree
-        .filter(e => e.type === 'blob' && (e.path.endsWith('/action.yml') || e.path.endsWith('/action.yaml') || e.path === 'action.yml' || e.path === 'action.yaml'))
-        .map(e => ({ name: e.path.split('/').pop(), path: e.path }));
-      return { files, rateLimit };
-    }
-  } catch {
-    // fall through to directory-based scan
-  }
-
-  // Fallback: check root + .github/actions/ recursively up to depth 3
-  const files = [];
-  let lastRateLimit = null;
-
-  for (const name of ['action.yml', 'action.yaml']) {
-    const { content, rateLimit } = await getOptionalFileContent(owner, repo, name, token);
-    if (rateLimit) lastRateLimit = rateLimit;
-    if (content !== null) files.push({ name, path: name });
-  }
-
-  async function listDir(dirPath, depth) {
-    if (depth > 3) return;
-    let result;
-    try {
-      result = await ghFetch(`${GITHUB_API}/repos/${owner}/${repo}/contents/${dirPath}`, token);
-    } catch (err) {
-      if (err.code === 'NOT_FOUND') return;
-      throw err;
-    }
-    const { data, rateLimit } = result;
-    if (rateLimit) lastRateLimit = rateLimit;
-    if (!Array.isArray(data)) return;
-    for (const entry of data) {
-      if (entry.type === 'dir') {
-        await listDir(entry.path, depth + 1);
-      } else if (entry.type === 'file' && (entry.name === 'action.yml' || entry.name === 'action.yaml')) {
-        files.push({ name: entry.name, path: entry.path });
-      }
-    }
-  }
-
-  await listDir('.github/actions', 1);
-  return { files, rateLimit: lastRateLimit };
-}
-
-/**
  * List repositories accessible to the authenticated user.
  * Fetches all pages (up to maxRepos) and returns { repos: [...], rateLimit }.
  */
@@ -231,6 +137,227 @@ export async function listUserRepos(token, maxRepos = 300) {
   }
 
   return { repos: allRepos.slice(0, maxRepos), rateLimit: lastRateLimit };
+}
+
+/**
+ * Fetch a file's raw content, returning null if it doesn't exist (404).
+ * Returns { content: string|null, rateLimit }.
+ */
+export async function getOptionalFileContent(owner, repo, path, token) {
+  const rawHeaders = {
+    Accept: 'application/vnd.github.raw+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (token) rawHeaders.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`, { headers: rawHeaders });
+  } catch {
+    return { content: null, rateLimit: null };
+  }
+
+  const rateLimit = {
+    remaining: parseInt(response.headers.get('X-RateLimit-Remaining') ?? '-1', 10),
+    limit: parseInt(response.headers.get('X-RateLimit-Limit') ?? '-1', 10),
+    reset: parseInt(response.headers.get('X-RateLimit-Reset') ?? '0', 10),
+  };
+
+  if (response.status === 404) return { content: null, rateLimit };
+  if (!response.ok) return { content: null, rateLimit };
+
+  const content = await response.text();
+  return { content, rateLimit };
+}
+
+/**
+ * Discover all action.yml / action.yaml files in a repo using the Git Trees API.
+ * Falls back to checking root + .github/actions/ if the tree is truncated.
+ * Returns { files: [{path, download_url}], rateLimit }.
+ */
+export async function listActionFiles(owner, repo, token) {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
+      { headers }
+    );
+  } catch {
+    return { files: [], rateLimit: null };
+  }
+
+  const rateLimit = {
+    remaining: parseInt(response.headers.get('X-RateLimit-Remaining') ?? '-1', 10),
+    limit: parseInt(response.headers.get('X-RateLimit-Limit') ?? '-1', 10),
+    reset: parseInt(response.headers.get('X-RateLimit-Reset') ?? '0', 10),
+  };
+
+  if (response.status === 404) return { files: [], rateLimit };
+  if (!response.ok) return { files: [], rateLimit };
+
+  const data = await response.json();
+
+  if (!data.truncated && Array.isArray(data.tree)) {
+    const actionFiles = data.tree.filter(
+      item => item.type === 'blob' && (item.path.endsWith('/action.yml') || item.path.endsWith('/action.yaml') || item.path === 'action.yml' || item.path === 'action.yaml')
+    );
+    return {
+      files: actionFiles.map(f => ({
+        path: f.path,
+        download_url: `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${f.path}`,
+      })),
+      rateLimit,
+    };
+  }
+
+  // Fallback: check root and .github/actions/ manually
+  const candidates = ['action.yml', 'action.yaml'];
+  const found = [];
+  for (const name of candidates) {
+    try {
+      const r = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/contents/${name}`, { headers });
+      if (r.ok) {
+        const d = await r.json();
+        found.push({ path: d.path, download_url: d.download_url });
+      }
+    } catch { /* ignore */ }
+  }
+
+  try {
+    const r = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/contents/.github/actions`, { headers });
+    if (r.ok) {
+      const dirs = await r.json();
+      for (const dir of dirs) {
+        if (dir.type !== 'dir') continue;
+        for (const name of ['action.yml', 'action.yaml']) {
+          try {
+            const r2 = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/contents/${dir.path}/${name}`, { headers });
+            if (r2.ok) {
+              const d = await r2.json();
+              found.push({ path: d.path, download_url: d.download_url });
+            }
+          } catch { /* ignore */ }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  return { files: found, rateLimit };
+}
+
+/**
+ * Check if a GitHub repository is archived.
+ * Returns { archived: boolean, rateLimit } or { archived: null } on 404/error.
+ */
+export async function getRepoMetadata(owner, repo, token) {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(`${GITHUB_API}/repos/${owner}/${repo}`, { headers });
+  } catch {
+    return { archived: null, rateLimit: null };
+  }
+
+  const rateLimit = {
+    remaining: parseInt(response.headers.get('X-RateLimit-Remaining') ?? '-1', 10),
+    limit: parseInt(response.headers.get('X-RateLimit-Limit') ?? '-1', 10),
+    reset: parseInt(response.headers.get('X-RateLimit-Reset') ?? '0', 10),
+  };
+
+  if (response.status === 404 || response.status === 403 || !response.ok) {
+    return { archived: null, rateLimit };
+  }
+
+  const data = await response.json();
+  return { archived: data.archived === true, rateLimit };
+}
+
+/**
+ * Verify that a commit SHA is reachable from the canonical repo's refs.
+ * Returns { exists: boolean|null, rateLimit }.
+ * exists: true = 200, exists: false = 404 or 422, exists: null = 403 or error.
+ */
+export async function verifyCommitInRepo(owner, repo, sha, token) {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/commits/${sha}`, { headers });
+  } catch {
+    return { exists: null, rateLimit: null };
+  }
+
+  const rateLimit = {
+    remaining: parseInt(response.headers.get('X-RateLimit-Remaining') ?? '-1', 10),
+    limit: parseInt(response.headers.get('X-RateLimit-Limit') ?? '-1', 10),
+    reset: parseInt(response.headers.get('X-RateLimit-Reset') ?? '0', 10),
+  };
+
+  if (response.status === 200) return { exists: true, rateLimit };
+  if (response.status === 404 || response.status === 422) return { exists: false, rateLimit };
+  // 403 = rate limit or permission issue — treat as unknown
+  return { exists: null, rateLimit };
+}
+
+/**
+ * Resolve a tag name to its commit SHA.
+ * Returns { sha: string|null, rateLimit }.
+ */
+export async function resolveTagToSha(owner, repo, tag, token) {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/git/ref/tags/${encodeURIComponent(tag)}`, { headers });
+  } catch {
+    return { sha: null, rateLimit: null };
+  }
+
+  const rateLimit = {
+    remaining: parseInt(response.headers.get('X-RateLimit-Remaining') ?? '-1', 10),
+    limit: parseInt(response.headers.get('X-RateLimit-Limit') ?? '-1', 10),
+    reset: parseInt(response.headers.get('X-RateLimit-Reset') ?? '0', 10),
+  };
+
+  if (!response.ok) return { sha: null, rateLimit };
+
+  const data = await response.json();
+  const refSha = data?.object?.sha ?? null;
+
+  // If the tag points to a tag object (annotated tag), we need to dereference it
+  if (data?.object?.type === 'tag') {
+    let derefResponse;
+    try {
+      derefResponse = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/git/tags/${refSha}`, { headers });
+    } catch {
+      return { sha: refSha, rateLimit };
+    }
+    if (derefResponse.ok) {
+      const tagData = await derefResponse.json();
+      return { sha: tagData?.object?.sha ?? refSha, rateLimit };
+    }
+  }
+
+  return { sha: refSha, rateLimit };
 }
 
 /**

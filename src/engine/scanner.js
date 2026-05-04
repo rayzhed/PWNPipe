@@ -1,5 +1,13 @@
-import { listWorkflowFiles, getWorkflowContent, listActionFiles, getOptionalFileContent } from './github-api.js';
-import { parseWorkflow } from './yaml-parser.js';
+import {
+  listWorkflowFiles,
+  getWorkflowContent,
+  listActionFiles,
+  getOptionalFileContent,
+  getRepoMetadata,
+  verifyCommitInRepo,
+  resolveTagToSha,
+} from './github-api.js';
+import { parseWorkflow, getAllSteps, findLineNumber, extractSnippet } from './yaml-parser.js';
 import { RULE_META } from './rules/metadata.js';
 import {
   checkTemplateInjection,
@@ -34,6 +42,10 @@ import {
   checkIdTokenWriteUnscoped,
   checkPrRunsOnSelfHosted,
   checkOverprovisionedSecrets,
+  checkConcurrencyMissing,
+  checkShellCmd,
+  checkDependabotMissingCooldown,
+  checkUseTrustedPublishing,
 } from './rules/index.js';
 
 const WORKFLOW_RULES = [
@@ -41,11 +53,11 @@ const WORKFLOW_RULES = [
   checkTemplateInjection,
   checkGithubEnv,
   checkActionsAllowUnsecureCommands,
-  // Trigger misuse (pwn request family)
+  // Trigger misuse
   checkDangerousTriggers,
   checkWorkflowRunTrigger,
   checkWorkflowRunArtifactEnvInjection,
-  // Supply chain (pinning)
+  // Supply chain
   checkUnpinnedActions,
   checkUnpinnedDockerImage,
   checkReusableWorkflowRef,
@@ -66,16 +78,20 @@ const WORKFLOW_RULES = [
   checkUnredactedSecrets,
   checkOverprovisionedSecrets,
   checkHardcodedContainerCredentials,
+  checkUseTrustedPublishing,
   // Authorization logic
   checkBotConditions,
   checkUnsoundContains,
   checkDependabotConfusedDeputy,
+  // Shell safety
+  checkShellCmd,
   // Operational risk
   checkObfuscation,
   checkDebugEnabled,
+  checkConcurrencyMissing,
 ];
 
-// Rules that operate purely on rawContent — run these on action files too
+// Rules that work on raw YAML content — also applied to action.yml files
 const RAW_CONTENT_RULES = [
   checkHardcodedSecrets,
   checkCurlPipeSh,
@@ -83,33 +99,204 @@ const RAW_CONTENT_RULES = [
   checkObfuscation,
 ];
 
-// Rules specifically for composite action.yml files
+// Rules specific to composite action.yml files
 const ACTION_RULES = [
   checkActionYmlTemplateInjection,
   checkActionYmlUnpinnedUses,
 ];
 
+const SHA40_RE = /^[a-f0-9]{40}$/;
+
+function collectUsesRefs(workflows) {
+  const refs = [];
+  for (const wf of workflows) {
+    if (!wf.parsed) continue;
+    const steps = getAllSteps(wf.parsed);
+    for (const { step } of steps) {
+      const uses = step.uses;
+      if (typeof uses !== 'string') continue;
+      if (uses.startsWith('./') || uses.startsWith('docker://')) continue;
+      const atIdx = uses.lastIndexOf('@');
+      if (atIdx === -1) continue;
+      const actionPath = uses.slice(0, atIdx);
+      const ref = uses.slice(atIdx + 1);
+      const parts = actionPath.split('/');
+      const owner = parts[0];
+      const repo  = parts[1];
+      if (!owner || !repo) continue;
+      refs.push({ owner, repo, ref, uses, file: wf.path, rawContent: wf.content });
+    }
+  }
+  return refs;
+}
+
+async function runNetworkRules(workflows, token, onProgress) {
+  if (!token) return [];
+
+  const findings = [];
+  const refs = collectUsesRefs(workflows);
+
+  // archived-uses
+  onProgress('Checking for archived action repositories');
+  const uniqueRepos = new Map();
+  for (const r of refs) {
+    const key = `${r.owner}/${r.repo}`;
+    if (!uniqueRepos.has(key)) uniqueRepos.set(key, []);
+    uniqueRepos.get(key).push(r);
+  }
+
+  for (const [repoKey, repoRefs] of uniqueRepos) {
+    const [owner, repo] = repoKey.split('/');
+    let archived = null;
+    try {
+      const result = await getRepoMetadata(owner, repo, token);
+      archived = result.archived;
+    } catch { /* skip */ }
+    if (archived !== true) continue;
+
+    for (const r of repoRefs) {
+      const lineNumber = findLineNumber(r.rawContent, r.uses.slice(0, 40));
+      const snippet    = extractSnippet(r.rawContent, lineNumber, 4);
+      findings.push({
+        id:          `archived-uses-${r.file}-${r.uses}`,
+        rule:        'archived-uses',
+        severity:    'medium',
+        title:       `Uses archived repository: \`${repoKey}\``,
+        file:        r.file,
+        line:        lineNumber,
+        snippet,
+        context:     `Action: \`${r.uses}\``,
+        detail:      `The action \`${r.uses}\` is hosted in the archived repository \`${repoKey}\`. Archived repositories receive no security fixes or updates. Any vulnerability discovered will never be patched.`,
+        exploit:     `If a vulnerability is found in the archived action (command injection, secret exfiltration), the maintainer will never release a fix. Attackers actively monitor archived projects used in CI pipelines.`,
+        impact:      'Persistent unpatched vulnerability in CI supply chain',
+        remediation: `Replace \`${r.uses}\` with an actively maintained alternative, a community fork, or inline the functionality directly into your workflow.`,
+        cvss: { score: 5.4, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N', cwe: 'CWE-1104' },
+      });
+    }
+  }
+
+  // impostor-commit
+  onProgress('Verifying pinned commit SHAs');
+  const shaRefs    = refs.filter(r => SHA40_RE.test(r.ref) && r.owner !== 'actions');
+  const uniqueShas = new Map();
+  for (const r of shaRefs) {
+    const key = `${r.owner}/${r.repo}@${r.ref}`;
+    if (!uniqueShas.has(key)) uniqueShas.set(key, []);
+    uniqueShas.get(key).push(r);
+  }
+
+  for (const [shaKey, shaGroup] of uniqueShas) {
+    const atIdx    = shaKey.lastIndexOf('@');
+    const ownerRepo = shaKey.slice(0, atIdx);
+    const sha       = shaKey.slice(atIdx + 1);
+    const [owner, repo] = ownerRepo.split('/');
+    let exists = null;
+    try {
+      const result = await verifyCommitInRepo(owner, repo, sha, token);
+      exists = result.exists;
+    } catch { /* skip */ }
+    if (exists !== false) continue;
+
+    for (const r of shaGroup) {
+      const lineNumber = findLineNumber(r.rawContent, r.ref.slice(0, 20));
+      const snippet    = extractSnippet(r.rawContent, lineNumber, 4);
+      findings.push({
+        id:          `impostor-commit-${r.file}-${r.ref}`,
+        rule:        'impostor-commit',
+        severity:    'critical',
+        title:       `Impostor commit: SHA not found in \`${ownerRepo}\``,
+        file:        r.file,
+        line:        lineNumber,
+        snippet,
+        context:     `Action: \`${r.uses}\`  ·  SHA: \`${sha}\``,
+        detail:      `The commit SHA \`${sha}\` pinned in \`${ownerRepo}\` is not reachable from any branch or tag of that repository. This is a strong indicator of an impostor commit — a commit that exists in GitHub's shared fork object pool but was never merged into the canonical repo.`,
+        exploit:     `An attacker creates a fork of \`${ownerRepo}\`, crafts a malicious commit in it, and waits for a pipeline to reference that SHA. Because GitHub's object pool is shared across all forks, the SHA resolves but executes attacker-controlled code with full access to secrets.`,
+        impact:      'Supply Chain RCE — attacker-controlled code executes in CI with secret access',
+        remediation: `Verify the correct SHA for the intended version tag at \`https://github.com/${ownerRepo}/releases\` and update the \`uses:\` reference to that SHA.`,
+        cvss: { score: 9.3, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H', cwe: 'CWE-829' },
+      });
+    }
+  }
+
+  // ref-version-mismatch
+  onProgress('Checking pinned SHA / version comment alignment');
+  const VERSION_COMMENT_RE = /uses:\s+\S+@([a-f0-9]{40})\s+#\s*(v[\w.\-]+)/;
+  const mismatchCandidates = [];
+
+  for (const wf of workflows) {
+    if (!wf.content) continue;
+    const lines = wf.content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = VERSION_COMMENT_RE.exec(lines[i]);
+      if (!m) continue;
+      const sha = m[1];
+      const tag = m[2];
+      const usesMatch = lines[i].match(/uses:\s+([^@/\s]+\/[^@/\s]+)[^@]*@/);
+      if (!usesMatch) continue;
+      const parts = usesMatch[1].split('/');
+      const owner = parts[0];
+      const repo  = parts[1];
+      if (!owner || !repo || owner === 'actions') continue;
+      mismatchCandidates.push({ owner, repo, sha, tag, lineNumber: i + 1, file: wf.path, rawContent: wf.content });
+    }
+  }
+
+  const uniqueTags = new Map();
+  for (const c of mismatchCandidates) {
+    const key = `${c.owner}/${c.repo}@${c.tag}`;
+    if (!uniqueTags.has(key)) uniqueTags.set(key, []);
+    uniqueTags.get(key).push(c);
+  }
+
+  for (const [, tagGroup] of uniqueTags) {
+    const first = tagGroup[0];
+    let resolvedSha = null;
+    try {
+      const result = await resolveTagToSha(first.owner, first.repo, first.tag, token);
+      resolvedSha = result.sha;
+    } catch { /* skip */ }
+    if (!resolvedSha) continue;
+
+    for (const c of tagGroup) {
+      if (resolvedSha === c.sha) continue;
+      const snippet = extractSnippet(c.rawContent, c.lineNumber, 4);
+      findings.push({
+        id:          `ref-version-mismatch-${c.file}-${c.sha.slice(0, 12)}`,
+        rule:        'ref-version-mismatch',
+        severity:    'low',
+        title:       `Pinned SHA does not match comment tag \`${c.tag}\` in \`${c.owner}/${c.repo}\``,
+        file:        c.file,
+        line:        c.lineNumber,
+        snippet,
+        context:     `Comment: \`${c.tag}\`  ·  Pinned: \`${c.sha.slice(0, 12)}…\`  ·  Tag resolves to: \`${resolvedSha.slice(0, 12)}…\``,
+        detail:      `The comment \`# ${c.tag}\` signals intent to pin to version \`${c.tag}\`, but the SHA \`${c.sha}\` does not match what \`${c.tag}\` currently resolves to (\`${resolvedSha}\`). Either the pin was updated without updating the comment, or the tag was force-moved after pinning.`,
+        exploit:     `If the tag was force-moved to a malicious commit, the pin comment falsely advertises a trusted version. This misleads code reviewers into trusting a pin that may no longer correspond to the stated version.`,
+        impact:      'Misleading pin comment reduces supply chain audit confidence',
+        remediation: `Re-pin to the correct SHA for \`${c.tag}\`:\n\nuses: ${c.owner}/${c.repo}@${resolvedSha}  # ${c.tag}`,
+        cvss: { score: 3.7, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N', cwe: 'CWE-345' },
+      });
+    }
+  }
+
+  return findings;
+}
+
 /**
  * Main scan orchestrator.
- *
- * @param {string} owner
- * @param {string} repo
- * @param {string} token
- * @param {function} onProgress  - called with ({ step, label, done, total })
- * @returns {Promise<ScanResult>}
  */
 export async function scanRepository(owner, repo, token, onProgress = () => {}) {
   const steps = [
     'Connecting to GitHub API',
     'Fetching workflow files',
     'Fetching action files',
-    'Fetching dependabot.yml',
+    'Fetching dependabot config',
     'Parsing YAML',
     'Checking dangerous triggers',
     'Detecting template injections',
     'Verifying action pinning',
     'Auditing GITHUB_TOKEN permissions',
     'Running additional checks',
+    'Network enrichment checks',
     'Calculating risk score',
   ];
 
@@ -121,17 +308,17 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
 
   progress(0);
 
-  // Step 1: list workflow files
+  // Step 1: workflow files
   progress(1);
   const { files, rateLimit: rl1 } = await listWorkflowFiles(owner, repo, token);
   if (rl1) lastRateLimit = rl1;
 
-  // Step 2: discover action files
+  // Step 2: action files
   progress(2);
   const { files: actionFileList, rateLimit: rl2 } = await listActionFiles(owner, repo, token);
   if (rl2) lastRateLimit = rl2;
 
-  // Step 3: fetch dependabot config (.yml preferred, .yaml fallback)
+  // Step 3: dependabot config (.yml preferred, .yaml fallback)
   progress(3);
   let dependabotFile = null;
   for (const depPath of ['.github/dependabot.yml', '.github/dependabot.yaml']) {
@@ -156,7 +343,7 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     };
   }
 
-  // Step 4: fetch and parse each workflow
+  // Step 4: fetch and parse workflow files
   progress(4);
   const workflows = [];
   for (const file of files) {
@@ -166,7 +353,7 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     workflows.push({ name: file.name, path: file.path, content, parsed });
   }
 
-  // Fetch and parse each action file
+  // Fetch and parse action files
   const actionFiles = [];
   for (const file of actionFileList) {
     const { content, rateLimit: rlAf } = await getWorkflowContent(owner, repo, file.path, token);
@@ -175,60 +362,67 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     actionFiles.push({ name: file.name, path: file.path, content, parsed });
   }
 
-  // Steps 5-10: apply rules
+  // Steps 5-10: static rules on workflow files
   const findings = [];
 
   for (let ri = 0; ri < WORKFLOW_RULES.length; ri++) {
-    const progressStep = Math.min(5 + Math.floor(ri / 3), 9);
+    const progressStep = Math.min(5 + Math.floor(ri / 4), 9);
     progress(progressStep);
 
     const rule = WORKFLOW_RULES[ri];
     for (const wf of workflows) {
       if (!wf.parsed) continue;
       try {
-        const wfFindings = rule(wf.parsed, wf.content, wf.path);
-        findings.push(...wfFindings);
+        findings.push(...rule(wf.parsed, wf.content, wf.path));
       } catch (err) {
         if (import.meta.env.DEV) console.warn(`[PWNPipe] Rule ${rule.name} threw on ${wf.path}:`, err);
       }
     }
   }
 
-  // Run action-specific rules on action files
-  for (const actionFile of actionFiles) {
-    if (!actionFile.parsed) continue;
-
+  // Action-specific rules
+  for (const af of actionFiles) {
+    if (!af.parsed) continue;
     for (const rule of ACTION_RULES) {
-      try {
-        const af = rule(actionFile.parsed, actionFile.content, actionFile.path);
-        findings.push(...af);
-      } catch (err) {
-        if (import.meta.env.DEV) console.warn(`[PWNPipe] Action rule ${rule.name} threw on ${actionFile.path}:`, err);
+      try { findings.push(...rule(af.parsed, af.content, af.path)); } catch (err) {
+        if (import.meta.env.DEV) console.warn(`[PWNPipe] Action rule ${rule.name} threw on ${af.path}:`, err);
       }
     }
-
-    // Run rawContent rules on action files
     for (const rule of RAW_CONTENT_RULES) {
-      try {
-        const af = rule(actionFile.parsed, actionFile.content, actionFile.path);
-        findings.push(...af);
-      } catch (err) {
-        if (import.meta.env.DEV) console.warn(`[PWNPipe] Raw rule ${rule.name} threw on ${actionFile.path}:`, err);
+      try { findings.push(...rule(af.parsed, af.content, af.path)); } catch (err) {
+        if (import.meta.env.DEV) console.warn(`[PWNPipe] Raw rule ${rule.name} threw on ${af.path}:`, err);
       }
     }
   }
 
-  // Run dependabot-specific rule on dependabot.yml
-  if (dependabotFile && dependabotFile.parsed) {
+  // Dependabot rules
+  if (dependabotFile?.parsed) {
     try {
-      const df = checkDependabotInsecureExecution(dependabotFile.parsed, dependabotFile.content, dependabotFile.path);
-      findings.push(...df);
+      findings.push(...checkDependabotInsecureExecution(dependabotFile.parsed, dependabotFile.content, dependabotFile.path));
     } catch (err) {
       if (import.meta.env.DEV) console.warn('[PWNPipe] checkDependabotInsecureExecution threw:', err);
     }
+    try {
+      findings.push(...checkDependabotMissingCooldown(dependabotFile.parsed, dependabotFile.content, dependabotFile.path));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] checkDependabotMissingCooldown threw:', err);
+    }
   }
 
-  // Attach OWASP CI/CD Top 10 category and detection confidence to every finding
+  // Step 11: network enrichment
+  progress(10);
+  try {
+    const networkFindings = await runNetworkRules(
+      workflows,
+      token,
+      (label) => onProgress({ step: 10, label, total: steps.length }),
+    );
+    findings.push(...networkFindings);
+  } catch (err) {
+    if (import.meta.env.DEV) console.warn('[PWNPipe] runNetworkRules threw:', err);
+  }
+
+  // Attach OWASP + confidence to every finding
   for (const f of findings) {
     const meta = RULE_META[f.rule];
     if (!meta) continue;
@@ -238,8 +432,7 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
       : (meta.confidence ?? 'MEDIUM');
   }
 
-  // Step 11: score
-  progress(10);
+  progress(11);
 
   return {
     owner,

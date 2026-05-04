@@ -22,7 +22,7 @@ Export formats from the results page:
 | Full Report Card (PNG) | All findings as a shareable image |
 | Print / PDF | Browser print — findings expand automatically |
 
-## Rules
+## Rules (39)
 
 | Rule | OWASP | Confidence |
 |---|---|---|
@@ -46,6 +46,25 @@ Export formats from the results page:
 | Token leaked to logs | CICD-SEC-6 | MEDIUM |
 | `ACTIONS_STEP_DEBUG` enabled | CICD-SEC-7 | CONFIRMED |
 | Unsound `contains()` authorization checks | CICD-SEC-2 | HIGH |
+| Template injection in composite `action.yml` | CICD-SEC-4 | HIGH |
+| Unpinned `uses:` in composite actions | CICD-SEC-3 | CONFIRMED |
+| Known CVE-affected actions (e.g. CVE-2025-30066) | CICD-SEC-3 | CONFIRMED |
+| Secrets expanded outside `env:` context | CICD-SEC-6 | HIGH |
+| Unredacted secrets in step output | CICD-SEC-6 | HIGH |
+| `workflow_run` artifact `GITHUB_ENV` injection | CICD-SEC-4 | HIGH |
+| Dependabot insecure step execution | CICD-SEC-4 | HIGH |
+| Dependabot confused-deputy bypass | CICD-SEC-2 | HIGH |
+| Hardcoded container registry credentials | CICD-SEC-6 | CONFIRMED |
+| `id-token: write` at workflow scope (not job scope) | CICD-SEC-5 | HIGH / MEDIUM |
+| PRs running on self-hosted runners | CICD-SEC-7 | HIGH |
+| Overprovisioned secrets in job env | CICD-SEC-5 | MEDIUM |
+| Concurrency missing on write/deploy workflows | CICD-SEC-1 | MEDIUM |
+| `shell: cmd` / `shell: powershell` in steps | CICD-SEC-4 | HIGH / MEDIUM |
+| Dependabot cooldown missing (npm/pip) | CICD-SEC-3 | LOW |
+| PyPI/npm publish using long-lived token (use OIDC instead) | CICD-SEC-6 | MEDIUM |
+| Uses archived action repository (network) | CICD-SEC-3 | CONFIRMED |
+| Impostor commit - SHA not reachable from canonical repo (network) | CICD-SEC-3 | CONFIRMED |
+| Action ref version/comment mismatch (network) | CICD-SEC-3 | MEDIUM |
 
 ## Architecture
 
