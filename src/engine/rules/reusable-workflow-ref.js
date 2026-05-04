@@ -34,7 +34,7 @@ export function checkReusableWorkflowRef(workflow, rawContent, filename) {
       rule: 'reusable-workflow-ref',
       severity: 'high',
       title: `Unpinned Reusable Workflow: \`${uses}\``,
-      file: `.github/workflows/${filename}`,
+      file: filename,
       line: lineNumber,
       snippet,
       context: `Job: \`${job.name ?? jobId}\`  ·  Ref type: ${refType}`,

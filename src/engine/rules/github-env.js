@@ -40,7 +40,7 @@ export function checkGithubEnv(workflow, rawContent, filename) {
       rule: 'github-env',
       severity: 'high',
       title: 'Unsanitized Input Written to GITHUB_ENV / GITHUB_PATH',
-      file: `.github/workflows/${filename}`,
+      file: filename,
       line: lineNumber,
       snippet,
       context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,

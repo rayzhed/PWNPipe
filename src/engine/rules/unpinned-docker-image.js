@@ -30,7 +30,7 @@ export function checkUnpinnedDockerImage(workflow, rawContent, filename) {
       rule: 'unpinned-docker-image',
       severity: 'high',
       title: `Unpinned Docker Image: \`${imageRef}\``,
-      file: `.github/workflows/${filename}`,
+      file: filename,
       line: lineNumber,
       snippet,
       context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}  ·  Tag: ${tag}`,

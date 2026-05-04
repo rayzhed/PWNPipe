@@ -29,7 +29,7 @@ export function checkCurlPipeSh(workflow, rawContent, filename) {
       rule: 'curl-pipe-sh',
       severity: 'high',
       title: 'Remote Script Executed Without Integrity Check',
-      file: `.github/workflows/${filename}`,
+      file: filename,
       line: lineNumber,
       snippet,
       context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,

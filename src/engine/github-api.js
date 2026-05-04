@@ -110,6 +110,88 @@ export async function getWorkflowContent(owner, repo, path, token) {
 }
 
 /**
+ * Fetch a single optional file. Returns { content: null, rateLimit: null } on 404.
+ * Returns { content: string, rateLimit }.
+ */
+export async function getOptionalFileContent(owner, repo, path, token) {
+  const rawHeaders = {
+    Accept: 'application/vnd.github.raw+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (token) rawHeaders.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`,
+    { headers: rawHeaders }
+  );
+
+  const rateLimit = {
+    remaining: parseInt(response.headers.get('X-RateLimit-Remaining') ?? '-1', 10),
+    limit: parseInt(response.headers.get('X-RateLimit-Limit') ?? '-1', 10),
+    reset: parseInt(response.headers.get('X-RateLimit-Reset') ?? '0', 10),
+  };
+
+  if (response.status === 404) {
+    return { content: null, rateLimit: null };
+  }
+  if (!response.ok) {
+    const err = new Error(`Failed to fetch ${path}: ${response.status}`);
+    err.code = 'API_ERROR';
+    throw err;
+  }
+
+  const content = await response.text();
+  return { content, rateLimit };
+}
+
+/**
+ * List action.yml / action.yaml files in the repo root and under .github/actions/ (up to depth 3).
+ * Returns { files: [{name, path}], rateLimit }.
+ */
+export async function listActionFiles(owner, repo, token) {
+  const files = [];
+  let lastRateLimit = null;
+
+  // Check root-level action.yml and action.yaml
+  for (const name of ['action.yml', 'action.yaml']) {
+    const { content, rateLimit } = await getOptionalFileContent(owner, repo, name, token);
+    if (rateLimit) lastRateLimit = rateLimit;
+    if (content !== null) {
+      files.push({ name, path: name });
+    }
+  }
+
+  // Recursively list .github/actions/ up to depth 3
+  async function listDir(dirPath, depth) {
+    if (depth > 3) return;
+    let result;
+    try {
+      result = await ghFetch(
+        `${GITHUB_API}/repos/${owner}/${repo}/contents/${dirPath}`,
+        token
+      );
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') return;
+      throw err;
+    }
+    const { data, rateLimit } = result;
+    if (rateLimit) lastRateLimit = rateLimit;
+    if (!Array.isArray(data)) return;
+    for (const entry of data) {
+      if (entry.type === 'dir') {
+        await listDir(entry.path, depth + 1);
+      } else if (entry.type === 'file' && (entry.name === 'action.yml' || entry.name === 'action.yaml')) {
+        files.push({ name: entry.name, path: entry.path });
+      }
+    }
+  }
+
+  await listDir('.github/actions', 1);
+
+  return { files, rateLimit: lastRateLimit };
+}
+
+/**
  * List repositories accessible to the authenticated user.
  * Fetches all pages (up to maxRepos) and returns { repos: [...], rateLimit }.
  */

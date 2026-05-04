@@ -38,7 +38,7 @@ export function checkCachePoisoning(workflow, rawContent, filename) {
     rule: 'cache-poisoning',
     severity: 'high',
     title: 'Potential Cache Poisoning in Release Workflow',
-    file: `.github/workflows/${filename}`,
+    file: filename,
     line: lineNumber,
     snippet,
     context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}  ·  Triggers: ${triggers.join(', ')}`,

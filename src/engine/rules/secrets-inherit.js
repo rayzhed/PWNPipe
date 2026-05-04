@@ -24,7 +24,7 @@ export function checkSecretsInherit(workflow, rawContent, filename) {
       title: isSameRepo
         ? 'secrets: inherit to Same-Repository Reusable Workflow'
         : 'secrets: inherit Passes All Secrets to Reusable Workflow',
-      file: `.github/workflows/${filename}`,
+      file: filename,
       line: lineNumber,
       snippet,
       context: `Job: \`${job.name ?? jobId}\`  ·  Calls: \`${job.uses}\``,

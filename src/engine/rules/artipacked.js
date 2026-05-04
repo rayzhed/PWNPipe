@@ -45,7 +45,7 @@ export function checkArtipacked(workflow, rawContent, filename) {
       rule: 'artipacked',
       severity: 'medium',
       title: 'Artipacked: Git Credentials May Leak via Artifact',
-      file: `.github/workflows/${filename}`,
+      file: filename,
       line: lineNumber,
       snippet,
       context: `Job: \`${job.name ?? jobId}\``,

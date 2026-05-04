@@ -59,7 +59,7 @@ function makeFinding(filename, jobId, jobName, stepIndex, uses, ref, severity, l
     rule: 'unpinned-actions',
     severity,
     title: `Unpinned Action: \`${uses}\``,
-    file: `.github/workflows/${filename}`,
+    file: filename,
     line: lineNumber,
     snippet,
     context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}  ·  Ref type: ${refType}`,

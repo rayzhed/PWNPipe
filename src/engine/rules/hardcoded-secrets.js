@@ -60,7 +60,7 @@ export function checkHardcodedSecrets(workflow, rawContent, filename) {
         rule: 'hardcoded-secrets',
         severity: 'critical',
         title: `Hardcoded Secret: ${name}`,
-        file: `.github/workflows/${filename}`,
+        file: filename,
         line: lineNumber,
         snippet,
         context: `Detected pattern: ${name}`,

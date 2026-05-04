@@ -76,7 +76,7 @@ export function checkSelfHostedRunner(workflow, rawContent, filename) {
       rule: 'self-hosted-runner',
       severity,
       title: `Self-Hosted Runner${hasPublicTrigger ? ' with Public Trigger' : ''}`,
-      file: `.github/workflows/${filename}`,
+      file: filename,
       line: lineNumber,
       snippet,
       context: `Job: \`${job.name ?? jobId}\`  ·  Triggers: ${triggers.join(', ') || 'unknown'}`,

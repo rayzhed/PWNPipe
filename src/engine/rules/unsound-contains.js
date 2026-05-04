@@ -21,7 +21,7 @@ function checkCondition(condition, rawContent, filename, id, context) {
     rule: 'unsound-contains',
     severity: 'medium',
     title: 'Unsound contains() Used for Authorization',
-    file: `.github/workflows/${filename}`,
+    file: filename,
     line: lineNumber,
     snippet,
     context,

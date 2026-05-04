@@ -18,7 +18,7 @@ function checkEnvBlock(envBlock, rawContent, filename, contextLabel) {
     rule: 'actions-allow-unsecure-commands',
     severity: 'high',
     title: 'Deprecated Unsafe Workflow Commands Re-Enabled',
-    file: `.github/workflows/${filename}`,
+    file: filename,
     line: lineNumber,
     snippet,
     context: contextLabel,

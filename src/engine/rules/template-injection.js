@@ -58,7 +58,7 @@ export function checkTemplateInjection(workflow, rawContent, filename) {
         rule: 'template-injection',
         severity: 'critical',
         title: 'Template Injection in run: block',
-        file: `.github/workflows/${filename}`,
+        file: filename,
         line: lineNumber,
         snippet,
         context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,

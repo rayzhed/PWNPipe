@@ -17,7 +17,7 @@ function scanCondition(condition, rawContent, filename, jobId, jobName, context)
     rule: 'bot-conditions',
     severity: 'medium',
     title: 'Spoofable Bot Actor Check',
-    file: `.github/workflows/${filename}`,
+    file: filename,
     line: lineNumber,
     snippet,
     context: `Job: \`${jobName}\`  ·  Condition: ${context}`,

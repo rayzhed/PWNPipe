@@ -21,7 +21,7 @@ function searchEnvBlock(envBlock, rawContent, filename) {
       rule: 'debug-enabled',
       severity: 'medium',
       title: `Debug Logging Enabled: ${key}`,
-      file: `.github/workflows/${filename}`,
+      file: filename,
       line: lineNumber,
       snippet,
       context: `env variable: \`${key}: ${value}\``,

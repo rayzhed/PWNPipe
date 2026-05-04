@@ -54,6 +54,17 @@ export function findLineNumber(rawContent, pattern) {
 }
 
 /**
+ * Get all steps from a parsed composite action.yml.
+ * Returns [{ step, stepIndex }]
+ */
+export function getActionSteps(parsedAction) {
+  if (parsedAction?.runs?.using !== 'composite') return [];
+  const steps = parsedAction?.runs?.steps;
+  if (!Array.isArray(steps)) return [];
+  return steps.map((step, stepIndex) => ({ step, stepIndex }));
+}
+
+/**
  * Extract a small snippet of context lines around a line number.
  */
 export function extractSnippet(rawContent, lineNumber, context = 3) {

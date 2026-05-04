@@ -37,7 +37,7 @@ export function checkObfuscation(workflow, rawContent, filename) {
         rule: 'obfuscation',
         severity: 'medium',
         title: `Potential Obfuscation: ${label}`,
-        file: `.github/workflows/${filename}`,
+        file: filename,
         line: lineNumber,
         snippet,
         context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,

@@ -39,7 +39,7 @@ export function checkTokenInLogs(workflow, rawContent, filename) {
         rule: 'token-in-logs',
         severity: 'medium',
         title: `Potential Secret Exposure in Logs: ${label}`,
-        file: `.github/workflows/${filename}`,
+        file: filename,
         line: lineNumber,
         snippet,
         context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,
