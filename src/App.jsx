@@ -7,17 +7,21 @@ import LoginScreen from '@/components/LoginScreen.jsx';
 import ScanInput from '@/components/ScanInput.jsx';
 import ScanAnimation from '@/components/ScanAnimation.jsx';
 import ResultsDashboard from '@/components/ResultsDashboard.jsx';
+import BatchScanProgress from '@/components/BatchScanProgress.jsx';
+import BatchResults from '@/components/BatchResults.jsx';
 import { extractOAuthCode, exchangeCodeForToken } from '@/auth/github-oauth.js';
 import { getAuthenticatedUser } from '@/engine/github-api.js';
 import { scanRepository } from '@/engine/scanner.js';
 
 const PHASE = {
-  LOGIN:    'login',
-  CALLBACK: 'callback',
-  INPUT:    'input',
-  SCANNING: 'scanning',
-  RESULTS:  'results',
-  ERROR:    'error',
+  LOGIN:          'login',
+  CALLBACK:       'callback',
+  INPUT:          'input',
+  SCANNING:       'scanning',
+  RESULTS:        'results',
+  BATCH_SCANNING: 'batch_scanning',
+  BATCH_RESULTS:  'batch_results',
+  ERROR:          'error',
 };
 
 const TOKEN_KEY = 'pwnpipe_token';
@@ -48,14 +52,16 @@ function clearPathRepo() {
 }
 
 export default function App() {
-  const [phase, setPhase]           = useState(PHASE.LOGIN);
-  const [token, setToken]           = useState(null);
-  const [user, setUser]             = useState(null);
-  const [scanStep, setScanStep]     = useState(0);
-  const [scanTarget, setScanTarget] = useState(null);
-  const [result, setResult]         = useState(null);
-  const [error, setError]           = useState(null);
-  const [rateLimit, setRateLimit]   = useState(null);
+  const [phase, setPhase]                 = useState(PHASE.LOGIN);
+  const [token, setToken]                 = useState(null);
+  const [user, setUser]                   = useState(null);
+  const [scanStep, setScanStep]           = useState(0);
+  const [scanTarget, setScanTarget]       = useState(null);
+  const [result, setResult]               = useState(null);
+  const [error, setError]                 = useState(null);
+  const [rateLimit, setRateLimit]         = useState(null);
+  const [batchResults, setBatchResults]   = useState([]);
+  const [batchProgress, setBatchProgress] = useState(null);
   // Repo from URL to auto-scan once authenticated
   const [pendingRepo, setPendingRepo] = useState(null);
 
@@ -185,8 +191,42 @@ export default function App() {
   function handleReset() {
     setResult(null);
     setScanTarget(null);
+    setBatchResults([]);
+    setBatchProgress(null);
     clearPathRepo();
     setPhase(PHASE.INPUT);
+  }
+
+  async function runBatchScan(repos) {
+    setBatchResults([]);
+    clearPathRepo();
+    setPhase(PHASE.BATCH_SCANNING);
+    const accumulated = [];
+
+    for (let i = 0; i < repos.length; i++) {
+      const { owner, name: repo } = repos[i];
+      setBatchProgress({ current: i + 1, total: repos.length, currentRepo: `${owner}/${repo}`, scanLabel: null });
+
+      try {
+        const scanResult = await scanRepository(owner, repo, token, ({ label }) => {
+          setBatchProgress(prev => ({ ...prev, scanLabel: label }));
+        });
+        if (scanResult.rateLimit) setRateLimit(scanResult.rateLimit);
+        accumulated.push({ ...scanResult, status: 'done' });
+      } catch (err) {
+        accumulated.push({ owner, repo, status: 'error', error: err.message, findings: [], workflows: [] });
+      }
+
+      setBatchResults([...accumulated]);
+    }
+
+    setPhase(PHASE.BATCH_RESULTS);
+  }
+
+  function handleViewBatchRepo(row) {
+    // Reconstruct a full result object from the batch row and switch to RESULTS view
+    setResult(row);
+    setPhase(PHASE.RESULTS);
   }
 
   return (
@@ -207,7 +247,7 @@ export default function App() {
         </Centered>
       )}
 
-      {phase === PHASE.INPUT    && <ScanInput user={user} token={token} rateLimit={rateLimit} onScan={handleScan} />}
+      {phase === PHASE.INPUT    && <ScanInput user={user} token={token} rateLimit={rateLimit} onScan={handleScan} onBatchScan={runBatchScan} />}
 
       {phase === PHASE.SCANNING && scanTarget && (
         <ScanAnimation currentStep={scanStep} owner={scanTarget.owner} repo={scanTarget.repo} />
@@ -215,6 +255,18 @@ export default function App() {
 
       {phase === PHASE.RESULTS  && result && (
         <ResultsDashboard result={result} onReset={handleReset} />
+      )}
+
+      {phase === PHASE.BATCH_SCANNING && batchProgress && (
+        <BatchScanProgress progress={batchProgress} />
+      )}
+
+      {phase === PHASE.BATCH_RESULTS && (
+        <BatchResults
+          results={batchResults}
+          onReset={handleReset}
+          onViewRepo={handleViewBatchRepo}
+        />
       )}
 
       {phase === PHASE.ERROR && (

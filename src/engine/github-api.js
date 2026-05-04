@@ -361,6 +361,74 @@ export async function resolveTagToSha(owner, repo, tag, token) {
 }
 
 /**
+ * Fetch repository security features and branch protection status.
+ * Returns {
+ *   defaultBranch: string,
+ *   secretScanning: 'enabled'|'disabled'|null,
+ *   pushProtection: 'enabled'|'disabled'|null,
+ *   branchProtection: boolean|null,  // true = protected, false = not, null = unknown
+ *   codeScanning: boolean|null,
+ *   rateLimit
+ * }
+ */
+export async function getRepositorySecurityInfo(owner, repo, token) {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let repoData = null;
+  let lastRateLimit = null;
+
+  try {
+    const r = await fetch(`${GITHUB_API}/repos/${owner}/${repo}`, { headers });
+    lastRateLimit = {
+      remaining: parseInt(r.headers.get('X-RateLimit-Remaining') ?? '-1', 10),
+      limit: parseInt(r.headers.get('X-RateLimit-Limit') ?? '-1', 10),
+      reset: parseInt(r.headers.get('X-RateLimit-Reset') ?? '0', 10),
+    };
+    if (r.ok) repoData = await r.json();
+  } catch { /* ignore */ }
+
+  const defaultBranch = repoData?.default_branch ?? 'main';
+  const sa = repoData?.security_and_analysis ?? null;
+  const secretScanning = sa?.secret_scanning?.status ?? null;
+  const pushProtection = sa?.secret_scanning_push_protection?.status ?? null;
+
+  // Branch protection
+  let branchProtection = null;
+  try {
+    const r2 = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/branches/${encodeURIComponent(defaultBranch)}/protection`,
+      { headers }
+    );
+    if (r2.status === 200) branchProtection = true;
+    else if (r2.status === 404) branchProtection = false;
+    // 403 = not admin — leave as null
+  } catch { /* ignore */ }
+
+  // Code scanning — check if any analysis exists
+  let codeScanning = null;
+  if (token) {
+    try {
+      const r3 = await fetch(
+        `${GITHUB_API}/repos/${owner}/${repo}/code-scanning/analyses?per_page=1`,
+        { headers }
+      );
+      if (r3.status === 200) {
+        const data = await r3.json();
+        codeScanning = Array.isArray(data) && data.length > 0;
+      } else if (r3.status === 404) {
+        codeScanning = false;
+      }
+    } catch { /* ignore */ }
+  }
+
+  return { defaultBranch, secretScanning, pushProtection, branchProtection, codeScanning, rateLimit: lastRateLimit };
+}
+
+/**
  * Parse "owner/repo" or full GitHub URL into { owner, repo }.
  */
 export function parseRepoInput(input) {

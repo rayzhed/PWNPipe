@@ -22,7 +22,7 @@ Export formats from the results page:
 | Full Report Card (PNG) | All findings as a shareable image |
 | Print / PDF | Browser print — findings expand automatically |
 
-## Rules (39)
+## Rules (56)
 
 | Rule | OWASP | Confidence |
 |---|---|---|
@@ -65,6 +65,19 @@ Export formats from the results page:
 | Uses archived action repository (network) | CICD-SEC-3 | CONFIRMED |
 | Impostor commit - SHA not reachable from canonical repo (network) | CICD-SEC-3 | CONFIRMED |
 | Action ref version/comment mismatch (network) | CICD-SEC-3 | MEDIUM |
+| `GITHUB_OUTPUT` write from untrusted input | CICD-SEC-4 | HIGH |
+| `GITHUB_STEP_SUMMARY` Markdown injection | CICD-SEC-4 | HIGH |
+| `strategy.matrix` populated from untrusted event data | CICD-SEC-4 | HIGH |
+| `runs-on` label controlled by untrusted input | CICD-SEC-7 | CONFIRMED / HIGH |
+| Job missing `timeout-minutes` (DoS / cost) | CICD-SEC-7 | MEDIUM |
+| `continue-on-error: true` silencing security failures | CICD-SEC-10 | HIGH / MEDIUM |
+| Renovate auto-merge / post-upgrade commands / direct push | CICD-SEC-3 | CONFIRMED |
+| Pre-commit hook not pinned to SHA / `language: system` | CICD-SEC-3 | HIGH |
+| Branch protection disabled on default branch (network) | CICD-SEC-2 | CONFIRMED |
+| GitHub Secret Scanning disabled (network) | CICD-SEC-10 | CONFIRMED |
+| Secret Scanning Push Protection disabled (network) | CICD-SEC-10 | CONFIRMED |
+| No Code Scanning (CodeQL) configured (network) | CICD-SEC-10 | CONFIRMED |
+| Batch multi-repo scan with aggregate risk table | - | - |
 
 ## Architecture
 

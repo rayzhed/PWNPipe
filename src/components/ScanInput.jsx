@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
-import { Search, Zap } from 'lucide-react';
+import { Search, Zap, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { parseRepoInput } from '@/engine/github-api.js';
 import RepoList from '@/components/RepoList.jsx';
+import { listUserRepos } from '@/engine/github-api.js';
 
-export default function ScanInput({ user, token, rateLimit, onScan }) {
-  const [value, setValue] = useState('');
-  const [error, setError] = useState('');
+export default function ScanInput({ user, token, rateLimit, onScan, onBatchScan }) {
+  const [value, setValue]         = useState('');
+  const [error, setError]         = useState('');
+  const [batchLoading, setBatchLoading] = useState(false);
 
   function handleChange(e) {
     const v = e.target.value;
@@ -141,6 +143,26 @@ export default function ScanInput({ user, token, rateLimit, onScan }) {
             <div className="h-px flex-1 bg-border" />
             <span className="font-mono text-xs text-muted-foreground">or pick from your repositories</span>
             <div className="h-px flex-1 bg-border" />
+            <button
+              onClick={async () => {
+                setBatchLoading(true);
+                try {
+                  const { repos } = await listUserRepos(token);
+                  onBatchScan(repos);
+                } catch {
+                  setBatchLoading(false);
+                }
+              }}
+              disabled={batchLoading}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-xs transition-colors',
+                batchLoading ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary/50 hover:text-primary text-muted-foreground'
+              )}
+              title="Scan all your accessible repositories"
+            >
+              <Layers className="size-3" />
+              {batchLoading ? 'Loading…' : 'Scan all'}
+            </button>
           </div>
           <RepoList token={token} onScan={onScan} />
         </div>

@@ -34,3 +34,11 @@ export { checkHardcodedContainerCredentials }     from './hardcoded-container-cr
 export { checkIdTokenWriteUnscoped }              from './id-token-write-unscoped.js';
 export { checkPrRunsOnSelfHosted }                from './pr-runs-on-self-hosted.js';
 export { checkOverprovisionedSecrets }            from './overprovisioned-secrets.js';
+export { checkGithubOutputInjection }             from './github-output-injection.js';
+export { checkStepSummaryInjection }              from './step-summary-injection.js';
+export { checkMatrixInjection }                   from './matrix-injection.js';
+export { checkRunsOnInjection }                   from './runs-on-injection.js';
+export { checkMissingTimeout }                    from './missing-timeout.js';
+export { checkContinueOnError }                   from './continue-on-error.js';
+export { checkRenovateAutomerge }                 from './renovate-automerge.js';
+export { checkPreCommitUnsafe }                   from './pre-commit-unsafe.js';

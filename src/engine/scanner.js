@@ -6,6 +6,7 @@ import {
   getRepoMetadata,
   verifyCommitInRepo,
   resolveTagToSha,
+  getRepositorySecurityInfo,
 } from './github-api.js';
 import { parseWorkflow, getAllSteps, findLineNumber, extractSnippet } from './yaml-parser.js';
 import { RULE_META } from './rules/metadata.js';
@@ -46,6 +47,14 @@ import {
   checkShellCmd,
   checkDependabotMissingCooldown,
   checkUseTrustedPublishing,
+  checkGithubOutputInjection,
+  checkStepSummaryInjection,
+  checkMatrixInjection,
+  checkRunsOnInjection,
+  checkMissingTimeout,
+  checkContinueOnError,
+  checkRenovateAutomerge,
+  checkPreCommitUnsafe,
 } from './rules/index.js';
 
 const WORKFLOW_RULES = [
@@ -89,6 +98,14 @@ const WORKFLOW_RULES = [
   checkObfuscation,
   checkDebugEnabled,
   checkConcurrencyMissing,
+  // Injection variants
+  checkGithubOutputInjection,
+  checkStepSummaryInjection,
+  checkMatrixInjection,
+  checkRunsOnInjection,
+  // Resilience / visibility
+  checkMissingTimeout,
+  checkContinueOnError,
 ];
 
 // Rules that work on raw YAML content — also applied to action.yml files
@@ -290,6 +307,7 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     'Fetching workflow files',
     'Fetching action files',
     'Fetching dependabot config',
+    'Fetching renovate / pre-commit config',
     'Parsing YAML',
     'Checking dangerous triggers',
     'Detecting template injections',
@@ -297,6 +315,7 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     'Auditing GITHUB_TOKEN permissions',
     'Running additional checks',
     'Network enrichment checks',
+    'Checking repository security settings',
     'Calculating risk score',
   ];
 
@@ -330,12 +349,37 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     }
   }
 
-  if (files.length === 0 && actionFileList.length === 0 && !dependabotFile) {
+  // Step 4: renovate + pre-commit configs
+  progress(4);
+  let renovateFile = null;
+  for (const rPath of ['renovate.json', 'renovate.json5', '.github/renovate.json', '.github/renovate.json5']) {
+    const { content: rContent } = await getOptionalFileContent(owner, repo, rPath, token);
+    if (rContent !== null) {
+      let parsed = null;
+      try { parsed = JSON.parse(rContent); } catch { /* invalid JSON */ }
+      renovateFile = { path: rPath, content: rContent, parsed };
+      break;
+    }
+  }
+
+  let preCommitFile = null;
+  for (const pcPath of ['.pre-commit-config.yaml', '.pre-commit-config.yml']) {
+    const { content: pcContent } = await getOptionalFileContent(owner, repo, pcPath, token);
+    if (pcContent !== null) {
+      preCommitFile = { path: pcPath, content: pcContent, parsed: parseWorkflow(pcContent) };
+      break;
+    }
+  }
+
+  if (files.length === 0 && actionFileList.length === 0 && !dependabotFile && !renovateFile && !preCommitFile) {
     return {
       owner, repo,
       workflows: [],
       actionFiles: [],
       dependabotFile: null,
+      renovateFile: null,
+      preCommitFile: null,
+      securityInfo: null,
       findings: [],
       rateLimit: lastRateLimit,
       scannedAt: new Date().toISOString(),
@@ -343,8 +387,8 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     };
   }
 
-  // Step 4: fetch and parse workflow files
-  progress(4);
+  // Step 5: fetch and parse workflow files
+  progress(5);
   const workflows = [];
   for (const file of files) {
     const { content, rateLimit: rlWf } = await getWorkflowContent(owner, repo, file.path, token);
@@ -362,11 +406,11 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     actionFiles.push({ name: file.name, path: file.path, content, parsed });
   }
 
-  // Steps 5-10: static rules on workflow files
+  // Steps 6-11: static rules on workflow files
   const findings = [];
 
   for (let ri = 0; ri < WORKFLOW_RULES.length; ri++) {
-    const progressStep = Math.min(5 + Math.floor(ri / 4), 9);
+    const progressStep = Math.min(6 + Math.floor(ri / 5), 10);
     progress(progressStep);
 
     const rule = WORKFLOW_RULES[ri];
@@ -409,17 +453,50 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     }
   }
 
-  // Step 11: network enrichment
-  progress(10);
+  // Renovate rules
+  if (renovateFile?.parsed) {
+    try {
+      findings.push(...checkRenovateAutomerge(renovateFile.parsed, renovateFile.content, renovateFile.path));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] checkRenovateAutomerge threw:', err);
+    }
+  }
+
+  // Pre-commit rules
+  if (preCommitFile?.parsed) {
+    try {
+      findings.push(...checkPreCommitUnsafe(preCommitFile.parsed, preCommitFile.content, preCommitFile.path));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] checkPreCommitUnsafe threw:', err);
+    }
+  }
+
+  // Step 11: network enrichment (existing: archived, impostor, mismatch)
+  progress(11);
   try {
     const networkFindings = await runNetworkRules(
       workflows,
       token,
-      (label) => onProgress({ step: 10, label, total: steps.length }),
+      (label) => onProgress({ step: 11, label, total: steps.length }),
     );
     findings.push(...networkFindings);
   } catch (err) {
     if (import.meta.env.DEV) console.warn('[PWNPipe] runNetworkRules threw:', err);
+  }
+
+  // Step 12: repository security settings check
+  progress(12);
+  let securityInfo = null;
+  if (token) {
+    try {
+      securityInfo = await getRepositorySecurityInfo(owner, repo, token);
+      if (securityInfo.rateLimit) lastRateLimit = securityInfo.rateLimit;
+
+      const secFindings = buildSecurityInfoFindings(owner, repo, securityInfo);
+      findings.push(...secFindings);
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] getRepositorySecurityInfo threw:', err);
+    }
   }
 
   // Attach OWASP + confidence to every finding
@@ -432,7 +509,7 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
       : (meta.confidence ?? 'MEDIUM');
   }
 
-  progress(11);
+  progress(13);
 
   return {
     owner,
@@ -440,9 +517,90 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
     workflows,
     actionFiles,
     dependabotFile,
+    renovateFile,
+    preCommitFile,
+    securityInfo,
     findings,
     rateLimit: lastRateLimit,
     scannedAt: new Date().toISOString(),
     noWorkflows: files.length === 0,
   };
+}
+
+function buildSecurityInfoFindings(owner, repo, info) {
+  const findings = [];
+
+  if (info.branchProtection === false) {
+    findings.push({
+      id:          `repo-no-branch-protection-${owner}-${repo}`,
+      rule:        'repo-branch-protection',
+      severity:    'high',
+      title:       `No Branch Protection on \`${info.defaultBranch}\``,
+      file:        `${owner}/${repo}`,
+      line:        null,
+      snippet:     null,
+      context:     `Default branch: \`${info.defaultBranch}\``,
+      detail:      `The default branch \`${info.defaultBranch}\` has no branch protection rules. Anyone with write access can push directly, bypassing required reviews and status checks. CI workflows triggered by \`push\` to the default branch may run against unreviewed code.`,
+      exploit:     `A collaborator (or an attacker who compromises a collaborator's token) force-pushes malicious workflow changes to \`${info.defaultBranch}\` without any review. The next workflow run executes the attacker's code with full secret access.`,
+      impact:      'Unreviewed Code Executes with Full CI Secret Access',
+      remediation: `Enable branch protection on \`${info.defaultBranch}\`:\n- Require pull request reviews (at least 1 approval)\n- Require status checks to pass before merging\n- Prevent force pushes\n- Consider enabling required linear history`,
+      cvss:        { score: 7.4, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N', cwe: 'CWE-284' },
+    });
+  }
+
+  if (info.secretScanning === 'disabled') {
+    findings.push({
+      id:          `repo-secret-scanning-disabled-${owner}-${repo}`,
+      rule:        'repo-secret-scanning',
+      severity:    'medium',
+      title:       'GitHub Secret Scanning Disabled',
+      file:        `${owner}/${repo}`,
+      line:        null,
+      snippet:     null,
+      context:     'Repository security settings',
+      detail:      `GitHub Secret Scanning is disabled. Secrets accidentally committed to the repository (API tokens, private keys, connection strings) will not be detected or flagged. Leaked secrets remain in git history and are accessible to anyone with read access.`,
+      exploit:     `A developer accidentally commits an AWS access key. Without secret scanning, the commit goes unnoticed. An attacker with read access to the repo extracts the key from git history and uses it to access cloud infrastructure.`,
+      impact:      'Leaked Secrets in Git History Go Undetected',
+      remediation: `Enable GitHub Secret Scanning in repository Settings → Security & analysis → Secret scanning. Also enable push protection to block secrets from being committed in the first place.`,
+      cvss:        { score: 5.9, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N', cwe: 'CWE-522' },
+    });
+  }
+
+  if (info.pushProtection === 'disabled' && info.secretScanning === 'enabled') {
+    findings.push({
+      id:          `repo-push-protection-disabled-${owner}-${repo}`,
+      rule:        'repo-push-protection',
+      severity:    'medium',
+      title:       'Secret Scanning Push Protection Disabled',
+      file:        `${owner}/${repo}`,
+      line:        null,
+      snippet:     null,
+      context:     'Repository security settings',
+      detail:      `Secret Scanning is enabled but Push Protection is disabled. Push Protection blocks commits containing known secret patterns before they reach the repository. Without it, a secret committed to the repo lands in git history before it is detected — revocation and rotation must happen after the fact, during which the secret is exposed.`,
+      exploit:     `A developer commits a credential. Secret scanning detects it after the fact, but the commit is already in git history, replication has propagated it, and any cache or mirror may have a copy. The window between commit and detection is exploitable.`,
+      impact:      'Secrets Land in Git History Before Detection',
+      remediation: `Enable Push Protection in Settings → Security & analysis → Secret scanning → Push protection.`,
+      cvss:        { score: 4.7, vector: 'CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:N/A:N', cwe: 'CWE-522' },
+    });
+  }
+
+  if (info.codeScanning === false) {
+    findings.push({
+      id:          `repo-no-code-scanning-${owner}-${repo}`,
+      rule:        'repo-code-scanning',
+      severity:    'low',
+      title:       'No Code Scanning (CodeQL) Configured',
+      file:        `${owner}/${repo}`,
+      line:        null,
+      snippet:     null,
+      context:     'Repository security settings',
+      detail:      `No code scanning analyses have been found for this repository. GitHub's CodeQL (or a third-party SAST tool integrated with the code scanning API) is not configured. Vulnerabilities in application code (injection, XSS, path traversal, etc.) will not be automatically detected.`,
+      exploit:     `Without SAST coverage, a developer introduces a SQL injection or command injection vulnerability. It ships undetected through code review and CI, and is later exploited in production.`,
+      impact:      'Application Vulnerabilities Not Automatically Detected',
+      remediation: `Add a CodeQL workflow to the repository:\n\nuses: github/codeql-action/analyze@SHA  # latest\n\nOr use another SAST tool that integrates with the GitHub Code Scanning API.`,
+      cvss:        { score: 3.7, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N', cwe: 'CWE-1109' },
+    });
+  }
+
+  return findings;
 }
