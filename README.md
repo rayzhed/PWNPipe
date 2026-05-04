@@ -22,7 +22,7 @@ Export formats from the results page:
 | Full Report Card (PNG) | All findings as a shareable image |
 | Print / PDF | Browser print — findings expand automatically |
 
-## Rules (56)
+## Rules (55)
 
 | Rule | OWASP | Confidence |
 |---|---|---|
@@ -76,7 +76,6 @@ Export formats from the results page:
 | Branch protection disabled on default branch (network) | CICD-SEC-2 | CONFIRMED |
 | GitHub Secret Scanning disabled (network) | CICD-SEC-10 | CONFIRMED |
 | Secret Scanning Push Protection disabled (network) | CICD-SEC-10 | CONFIRMED |
-| No Code Scanning (CodeQL) configured (network) | CICD-SEC-10 | CONFIRMED |
 | Batch multi-repo scan with aggregate risk table | - | - |
 
 ## Architecture

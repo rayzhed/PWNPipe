@@ -584,23 +584,7 @@ function buildSecurityInfoFindings(owner, repo, info) {
     });
   }
 
-  if (info.codeScanning === false) {
-    findings.push({
-      id:          `repo-no-code-scanning-${owner}-${repo}`,
-      rule:        'repo-code-scanning',
-      severity:    'low',
-      title:       'No Code Scanning (CodeQL) Configured',
-      file:        `${owner}/${repo}`,
-      line:        null,
-      snippet:     null,
-      context:     'Repository security settings',
-      detail:      `No code scanning analyses have been found for this repository. GitHub's CodeQL (or a third-party SAST tool integrated with the code scanning API) is not configured. Vulnerabilities in application code (injection, XSS, path traversal, etc.) will not be automatically detected.`,
-      exploit:     `Without SAST coverage, a developer introduces a SQL injection or command injection vulnerability. It ships undetected through code review and CI, and is later exploited in production.`,
-      impact:      'Application Vulnerabilities Not Automatically Detected',
-      remediation: `Add a CodeQL workflow to the repository:\n\nuses: github/codeql-action/analyze@SHA  # latest\n\nOr use another SAST tool that integrates with the GitHub Code Scanning API.`,
-      cvss:        { score: 3.7, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N', cwe: 'CWE-1109' },
-    });
-  }
+
 
   return findings;
 }

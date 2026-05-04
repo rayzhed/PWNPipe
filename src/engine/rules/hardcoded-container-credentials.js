@@ -1,8 +1,9 @@
 import { getAllSteps, findLineNumber, extractSnippet } from '../yaml-parser.js';
 
-// Matches: docker login -p <value> or docker login --password <value>
-// where value does NOT begin with ${{ secrets. (i.e. is a hardcoded string)
+// docker login -p <value> or --password <value> where value is not a secret ref
 const DOCKER_LOGIN_RE = /docker\s+login(?:\s+\S+)?\s+(?:-p|--password)(?:\s+|=)(?!\$\{\{\s*secrets\.)([^\s'"]+|'[^']+'|"[^"]+")/;
+// echo "hardcoded" | docker login --password-stdin  (piped password not from secrets)
+const DOCKER_STDIN_RE = /echo\s+(?:"(?!\$\{\{\s*secrets\.)[^"]*"|'(?!\$\{\{\s*secrets\.)[^']*'|\$\{\{(?!\s*secrets\.)[\s\S]{0,80}?\}\})\s*\|+\s*docker\s+login/;
 
 function isSecretRef(value) {
   if (typeof value !== 'string') return true; // non-strings are not hardcoded
@@ -77,8 +78,10 @@ export function checkHardcodedContainerCredentials(workflow, rawContent, filenam
     steps.forEach((step, idx) => {
       const run = step.run;
       if (typeof run !== 'string') return;
-      const match = DOCKER_LOGIN_RE.exec(run);
-      if (!match) return;
+
+      const isExplicitPwd = DOCKER_LOGIN_RE.test(run);
+      const isStdinPwd    = DOCKER_STDIN_RE.test(run);
+      if (!isExplicitPwd && !isStdinPwd) return;
 
       const lineNumber = findLineNumber(rawContent, 'docker login');
       const snippet = extractSnippet(rawContent, lineNumber, 4);

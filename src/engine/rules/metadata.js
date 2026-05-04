@@ -73,5 +73,4 @@ export const RULE_META = {
   'repo-branch-protection':              { owasp: 'CICD-SEC-2', confidence: 'CONFIRMED' },
   'repo-secret-scanning':               { owasp: 'CICD-SEC-10', confidence: 'CONFIRMED' },
   'repo-push-protection':               { owasp: 'CICD-SEC-10', confidence: 'CONFIRMED' },
-  'repo-code-scanning':                 { owasp: 'CICD-SEC-10', confidence: 'CONFIRMED' },
 };

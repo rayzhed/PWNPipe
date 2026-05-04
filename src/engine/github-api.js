@@ -408,24 +408,7 @@ export async function getRepositorySecurityInfo(owner, repo, token) {
     // 403 = not admin — leave as null
   } catch { /* ignore */ }
 
-  // Code scanning — check if any analysis exists
-  let codeScanning = null;
-  if (token) {
-    try {
-      const r3 = await fetch(
-        `${GITHUB_API}/repos/${owner}/${repo}/code-scanning/analyses?per_page=1`,
-        { headers }
-      );
-      if (r3.status === 200) {
-        const data = await r3.json();
-        codeScanning = Array.isArray(data) && data.length > 0;
-      } else if (r3.status === 404) {
-        codeScanning = false;
-      }
-    } catch { /* ignore */ }
-  }
-
-  return { defaultBranch, secretScanning, pushProtection, branchProtection, codeScanning, rateLimit: lastRateLimit };
+  return { defaultBranch, secretScanning, pushProtection, branchProtection, rateLimit: lastRateLimit };
 }
 
 /**
