@@ -26,19 +26,25 @@ function saveToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 function loadToken()  { return localStorage.getItem(TOKEN_KEY) ?? ''; }
 function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 
-// Parse /owner/repo from the URL path
+const BASE = import.meta.env.BASE_URL; // '/PWNPipe/' in production, configurable via vite.config.js
+
+// Parse /owner/repo from the URL path, stripping the app base prefix if present.
+// Handles both direct navigation (/PWNPipe/owner/repo) and the GitHub Pages 404
+// restore cycle which replaces state to /owner/repo (without base).
 function parsePathRepo() {
-  const parts = window.location.pathname.replace(/^\//, '').split('/').filter(Boolean);
+  const path = window.location.pathname;
+  const relative = path.startsWith(BASE) ? path.slice(BASE.length) : path.replace(/^\//, '');
+  const parts = relative.split('/').filter(Boolean);
   if (parts.length >= 2) return { owner: parts[0], repo: parts[1] };
   return null;
 }
 
 function setPathRepo(owner, repo) {
-  window.history.pushState({}, '', `/${owner}/${repo}`);
+  window.history.pushState({}, '', `${BASE}${owner}/${repo}`);
 }
 
 function clearPathRepo() {
-  window.history.pushState({}, '', '/');
+  window.history.pushState({}, '', BASE);
 }
 
 export default function App() {
