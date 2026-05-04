@@ -145,31 +145,44 @@ export async function getOptionalFileContent(owner, repo, path, token) {
 }
 
 /**
- * List action.yml / action.yaml files in the repo root and under .github/actions/ (up to depth 3).
+ * List every action.yml / action.yaml in the repo using the Git Trees API (one request,
+ * full recursive traversal). Falls back to root + .github/actions/ scan if the tree is
+ * truncated (repos > ~100k files).
  * Returns { files: [{name, path}], rateLimit }.
  */
 export async function listActionFiles(owner, repo, token) {
+  // Try Git Trees API first — single call, finds action.yml anywhere (monorepos included)
+  try {
+    const { data, rateLimit } = await ghFetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
+      token
+    );
+
+    if (!data.truncated && Array.isArray(data.tree)) {
+      const files = data.tree
+        .filter(e => e.type === 'blob' && (e.path.endsWith('/action.yml') || e.path.endsWith('/action.yaml') || e.path === 'action.yml' || e.path === 'action.yaml'))
+        .map(e => ({ name: e.path.split('/').pop(), path: e.path }));
+      return { files, rateLimit };
+    }
+  } catch {
+    // fall through to directory-based scan
+  }
+
+  // Fallback: check root + .github/actions/ recursively up to depth 3
   const files = [];
   let lastRateLimit = null;
 
-  // Check root-level action.yml and action.yaml
   for (const name of ['action.yml', 'action.yaml']) {
     const { content, rateLimit } = await getOptionalFileContent(owner, repo, name, token);
     if (rateLimit) lastRateLimit = rateLimit;
-    if (content !== null) {
-      files.push({ name, path: name });
-    }
+    if (content !== null) files.push({ name, path: name });
   }
 
-  // Recursively list .github/actions/ up to depth 3
   async function listDir(dirPath, depth) {
     if (depth > 3) return;
     let result;
     try {
-      result = await ghFetch(
-        `${GITHUB_API}/repos/${owner}/${repo}/contents/${dirPath}`,
-        token
-      );
+      result = await ghFetch(`${GITHUB_API}/repos/${owner}/${repo}/contents/${dirPath}`, token);
     } catch (err) {
       if (err.code === 'NOT_FOUND') return;
       throw err;
@@ -187,7 +200,6 @@ export async function listActionFiles(owner, repo, token) {
   }
 
   await listDir('.github/actions', 1);
-
   return { files, rateLimit: lastRateLimit };
 }
 

@@ -131,16 +131,17 @@ export async function scanRepository(owner, repo, token, onProgress = () => {}) 
   const { files: actionFileList, rateLimit: rl2 } = await listActionFiles(owner, repo, token);
   if (rl2) lastRateLimit = rl2;
 
-  // Step 3: fetch dependabot.yml
+  // Step 3: fetch dependabot config (.yml preferred, .yaml fallback)
   progress(3);
-  const { content: dependabotContent, rateLimit: rl3 } = await getOptionalFileContent(
-    owner, repo, '.github/dependabot.yml', token
-  );
-  if (rl3) lastRateLimit = rl3;
-
-  const dependabotFile = dependabotContent !== null
-    ? { path: '.github/dependabot.yml', content: dependabotContent, parsed: parseWorkflow(dependabotContent) }
-    : null;
+  let dependabotFile = null;
+  for (const depPath of ['.github/dependabot.yml', '.github/dependabot.yaml']) {
+    const { content: depContent, rateLimit: rl3 } = await getOptionalFileContent(owner, repo, depPath, token);
+    if (rl3) lastRateLimit = rl3;
+    if (depContent !== null) {
+      dependabotFile = { path: depPath, content: depContent, parsed: parseWorkflow(depContent) };
+      break;
+    }
+  }
 
   if (files.length === 0 && actionFileList.length === 0 && !dependabotFile) {
     return {
