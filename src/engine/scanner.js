@@ -226,9 +226,9 @@ async function runNetworkRules(workflows, token, onProgress) {
         line:        lineNumber,
         snippet,
         context:     `Action: \`${r.uses}\`  ·  SHA: \`${sha}\``,
-        detail:      `The commit SHA \`${sha}\` pinned in \`${ownerRepo}\` is not reachable from any branch or tag of that repository. This is a strong indicator of an impostor commit — a commit that exists in GitHub's shared fork object pool but was never merged into the canonical repo.`,
+        detail:      `The commit SHA \`${sha}\` pinned in \`${ownerRepo}\` is not reachable from any branch or tag of that repository. This is a strong sign of an impostor commit: a commit that exists in GitHub's shared fork object pool but was never merged into the canonical repo.`,
         exploit:     `An attacker creates a fork of \`${ownerRepo}\`, crafts a malicious commit in it, and waits for a pipeline to reference that SHA. Because GitHub's object pool is shared across all forks, the SHA resolves but executes attacker-controlled code with full access to secrets.`,
-        impact:      'Supply Chain RCE — attacker-controlled code executes in CI with secret access',
+        impact:      'Supply Chain RCE: Attacker-Controlled Code Executes in CI with Secret Access',
         remediation: `Verify the correct SHA for the intended version tag at \`https://github.com/${ownerRepo}/releases\` and update the \`uses:\` reference to that SHA.`,
         cvss: { score: 9.3, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H', cwe: 'CWE-829' },
       });
@@ -558,10 +558,10 @@ function buildSecurityInfoFindings(owner, repo, info) {
       line:        null,
       snippet:     null,
       context:     'Repository security settings',
-      detail:      `GitHub Secret Scanning is disabled. Secrets accidentally committed to the repository (API tokens, private keys, connection strings) will not be detected or flagged. Leaked secrets remain in git history and are accessible to anyone with read access.`,
-      exploit:     `A developer accidentally commits an AWS access key. Without secret scanning, the commit goes unnoticed. An attacker with read access to the repo extracts the key from git history and uses it to access cloud infrastructure.`,
-      impact:      'Leaked Secrets in Git History Go Undetected',
-      remediation: `Enable GitHub Secret Scanning in repository Settings → Security & analysis → Secret scanning. Also enable push protection to block secrets from being committed in the first place.`,
+      detail:      `GitHub Secret Scanning is disabled. Secrets accidentally committed to the repository (API tokens, private keys, connection strings) will not be detected. Leaked secrets stay in git history accessible to anyone with read access.`,
+      exploit:     `A developer commits an AWS access key. Without secret scanning the commit goes unnoticed. An attacker with read access finds it in git history and uses it to access cloud infrastructure.`,
+      impact:      'Leaked Secrets in Git History Not Detected',
+      remediation: `Enable GitHub Secret Scanning in Settings > Security & analysis > Secret scanning. Also enable push protection to block secrets before they are committed.`,
       cvss:        { score: 5.9, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N', cwe: 'CWE-522' },
     });
   }
@@ -576,10 +576,10 @@ function buildSecurityInfoFindings(owner, repo, info) {
       line:        null,
       snippet:     null,
       context:     'Repository security settings',
-      detail:      `Secret Scanning is enabled but Push Protection is disabled. Push Protection blocks commits containing known secret patterns before they reach the repository. Without it, a secret committed to the repo lands in git history before it is detected — revocation and rotation must happen after the fact, during which the secret is exposed.`,
-      exploit:     `A developer commits a credential. Secret scanning detects it after the fact, but the commit is already in git history, replication has propagated it, and any cache or mirror may have a copy. The window between commit and detection is exploitable.`,
-      impact:      'Secrets Land in Git History Before Detection',
-      remediation: `Enable Push Protection in Settings → Security & analysis → Secret scanning → Push protection.`,
+      detail:      `Secret Scanning is enabled but Push Protection is disabled. Push Protection blocks commits containing known secret patterns before they reach the repository. Without it, a committed secret lands in git history and must be detected and rotated after the fact.`,
+      exploit:     `A developer commits a credential. Secret scanning detects it after the push, but the commit is already in git history and may have been replicated. There is a window between commit and detection where the secret is live.`,
+      impact:      'Secrets Committed Before Detection',
+      remediation: `Enable Push Protection in Settings > Security & analysis > Secret scanning > Push protection.`,
       cvss:        { score: 4.7, vector: 'CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:N/A:N', cwe: 'CWE-522' },
     });
   }

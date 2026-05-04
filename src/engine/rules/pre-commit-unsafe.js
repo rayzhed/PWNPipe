@@ -54,9 +54,9 @@ export function checkPreCommitUnsafe(parsed, rawContent, filePath) {
       line:        lineNumber,
       snippet,
       context:     `Repo: \`${repo.repo}\`  ·  Rev: \`${rev}\``,
-      detail:      `The pre-commit hook repo \`${repo.repo}\` is pinned to \`${rev}\` (a tag or branch), not a full SHA commit. If the tag is force-moved or the branch is updated to include malicious code, the hook will silently execute the attacker's code during the next CI run without any diff visible in this repo.`,
-      exploit:     `An attacker with write access to \`${repo.repo}\` (via a compromised maintainer account or a supply chain attack) force-moves the \`${rev}\` tag to a commit containing a malicious hook implementation. The next CI run installs the new version and executes arbitrary commands with secret access.`,
-      impact:      'Supply Chain — Malicious Hook Code Executes in CI Without Review',
+      detail:      `The pre-commit hook repo \`${repo.repo}\` is pinned to \`${rev}\` (a tag or branch), not a full commit SHA. If the tag is force-moved or the branch updated with malicious code, the next CI run will execute the new version without any diff visible in this repo.`,
+      exploit:     `An attacker with write access to \`${repo.repo}\` force-moves the \`${rev}\` tag to a commit with a malicious hook. The next CI run installs and runs it with secret access.`,
+      impact:      'Unpinned Hook Repo Can Silently Change',
       remediation: `Pin to a full SHA commit:\n\n- repo: ${repo.repo}\n  rev: <FULL_40_CHAR_SHA>  # ${rev}\n\nVerify the SHA at the time of pinning corresponds to the intended version.`,
       cvss:        { score: 4.2, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N', cwe: 'CWE-829' },
     });

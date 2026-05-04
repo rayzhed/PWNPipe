@@ -48,9 +48,9 @@ export function checkRunsOnInjection(workflow, rawContent, filename) {
       line:        lineNumber,
       snippet,
       context:     `Job: \`${jobName}\`  ·  runs-on: \`${runsOnStr}\``,
-      detail:      `The \`runs-on:\` label for job \`${jobId}\` is dynamically constructed from attacker-controlled event data (e.g. PR title, branch name, issue body). GitHub matches runner labels exactly — if an attacker controls the label value, they can route the job to a malicious self-hosted runner they register. The job then executes on attacker infrastructure with full access to all secrets and the GITHUB_TOKEN.`,
-      exploit:     `An attacker registers a self-hosted runner with a label crafted to match the dynamic expression outcome. They submit a PR or open an issue that sets the runs-on value to match their runner label. The job is dispatched to the attacker-controlled machine, which exfiltrates all secrets and the GITHUB_TOKEN.`,
-      impact:      'Job Hijacking — Attacker-Controlled Runner Executes with Secret Access',
+      detail:      `The \`runs-on:\` label for job \`${jobId}\` is built from attacker-controlled event data (PR title, branch name, issue body). GitHub dispatches jobs to runners matching the label exactly. If an attacker controls the label, they can route the job to a self-hosted runner they registered under that label and get full access to secrets and the GITHUB_TOKEN.`,
+      exploit:     `An attacker registers a self-hosted runner with a label matching the expression outcome, then submits a PR or opens an issue to set that label. The job is dispatched to their machine, which reads all secrets from the environment.`,
+      impact:      'Job Hijacking via Runner Label Injection',
       remediation: `Never derive \`runs-on:\` from untrusted event data. Use a static label or a hardcoded conditional:\n\nruns-on: ubuntu-latest\n\nIf OS variants are needed, use a static strategy matrix defined in the workflow file, not from event inputs.`,
       cvss:        { score: isFromPrEvent ? 9.8 : 8.1, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H', cwe: 'CWE-99' },
     });

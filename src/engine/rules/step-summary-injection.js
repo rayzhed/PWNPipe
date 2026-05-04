@@ -37,10 +37,10 @@ export function checkStepSummaryInjection(workflow, rawContent, filename) {
       line:        lineNumber,
       snippet,
       context:     `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,
-      detail:      `Attacker-controlled data is written to \`$GITHUB_STEP_SUMMARY\`, which renders as Markdown in the GitHub Actions job summary page. An attacker who controls the input can inject arbitrary Markdown including links to phishing pages, credential-harvesting images, or iframes. While this does not directly execute code, it creates a persistent XSS-like surface visible to every maintainer who views the job summary.`,
-      exploit:     `Submit a PR with a title like: \`Fix bug](https://evil.example/steal?token=\`. The rendered Markdown in the job summary will contain a clickable link leading maintainers to an attacker-controlled site. With a crafted image tag, the attacker can also beacon the viewer's GitHub session cookies if the summary is viewed in an XSS-vulnerable context.`,
-      impact:      'Markdown Injection → Phishing / Data Exfiltration via Job Summary',
-      remediation: `Never write unfiltered \`\${{ }}\` expressions to \`$GITHUB_STEP_SUMMARY\`. Pass values through env vars and HTML-encode them before writing:\n\nenv:\n  INPUT: \${{ github.event.pull_request.title }}\nrun: |\n  SAFE="$(printf '%s' "$INPUT" | sed 's/[&<>\"]/\\\\&/g')"\n  echo "### Report for $SAFE" >> $GITHUB_STEP_SUMMARY`,
+      detail:      `Attacker-controlled data is written to \`$GITHUB_STEP_SUMMARY\`, which renders as Markdown in the Actions job summary page. An attacker can inject arbitrary Markdown including links to phishing pages or credential-harvesting images. This does not execute code directly, but the injected content is visible to every maintainer who views the summary.`,
+      exploit:     `Submit a PR with a title like \`Fix bug](https://evil.example/steal?token=\`. The rendered Markdown in the job summary will contain a crafted link. Maintainers clicking it are sent to an attacker-controlled site.`,
+      impact:      'Markdown Injection in Job Summary',
+      remediation: `Pass values through env vars before writing to the summary:\n\nenv:\n  INPUT: \${{ github.event.pull_request.title }}\nrun: |\n  SAFE="$(printf '%s' "$INPUT" | sed 's/[&<>\"]/\\\\&/g')"\n  echo "### Report for $SAFE" >> $GITHUB_STEP_SUMMARY`,
       cvss:        { score: 5.3, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N', cwe: 'CWE-79' },
     });
   }
