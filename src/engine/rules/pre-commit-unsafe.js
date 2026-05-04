@@ -48,7 +48,7 @@ export function checkPreCommitUnsafe(parsed, rawContent, filePath) {
     findings.push({
       id:          `pre-commit-unpinned-${filePath}-${repo.repo}-${rev}`,
       rule:        'pre-commit-unsafe',
-      severity:    'medium',
+      severity:    'low',
       title:       `Pre-commit Hook Repo Not Pinned to SHA: \`${repo.repo}@${rev}\``,
       file:        filePath,
       line:        lineNumber,
@@ -58,7 +58,7 @@ export function checkPreCommitUnsafe(parsed, rawContent, filePath) {
       exploit:     `An attacker with write access to \`${repo.repo}\` (via a compromised maintainer account or a supply chain attack) force-moves the \`${rev}\` tag to a commit containing a malicious hook implementation. The next CI run installs the new version and executes arbitrary commands with secret access.`,
       impact:      'Supply Chain — Malicious Hook Code Executes in CI Without Review',
       remediation: `Pin to a full SHA commit:\n\n- repo: ${repo.repo}\n  rev: <FULL_40_CHAR_SHA>  # ${rev}\n\nVerify the SHA at the time of pinning corresponds to the intended version.`,
-      cvss:        { score: 6.5, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:L/A:N', cwe: 'CWE-829' },
+      cvss:        { score: 4.2, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N', cwe: 'CWE-829' },
     });
   }
 

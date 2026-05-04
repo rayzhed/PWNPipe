@@ -1,15 +1,21 @@
 import { findLineNumber, extractSnippet } from '../yaml-parser.js';
 
-// Any expression in runs-on is suspicious — runners should be static labels
 const EXPR_RE = /\$\{\{[\s\S]*?\}\}/;
 
-const DANGEROUS_CONTEXTS = [
-  'github.event.',
+// Contexts reachable by unauthenticated external users — truly dangerous in runs-on
+const UNAUTH_CONTEXTS = [
+  'github.event.issue',
+  'github.event.pull_request',
+  'github.event.comment',
+  'github.event.review',
+  'github.event.discussion',
+  'github.event.commits',
   'github.head_ref',
-  'inputs.',
-  'github.event.inputs.',
-  'matrix.',
+  'github.event.workflow_run',
 ];
+
+// matrix.* in runs-on is almost always a static matrix defined in the workflow itself (e.g.
+// matrix: {os: [ubuntu-latest, windows-latest]}) — not attacker-controlled. Skip it entirely.
 
 export function checkRunsOnInjection(workflow, rawContent, filename) {
   const findings = [];
@@ -22,7 +28,9 @@ export function checkRunsOnInjection(workflow, rawContent, filename) {
       : (Array.isArray(runsOn) ? runsOn.join(' ') : '');
 
     if (!EXPR_RE.test(runsOnStr)) continue;
-    if (!DANGEROUS_CONTEXTS.some(ctx => runsOnStr.includes(ctx))) continue;
+
+    const isUnauthControlled = UNAUTH_CONTEXTS.some(ctx => runsOnStr.includes(ctx));
+    if (!isUnauthControlled) continue;
 
     const lineNumber = findLineNumber(rawContent, 'runs-on:');
     const snippet = extractSnippet(rawContent, lineNumber, 4);
@@ -35,16 +43,16 @@ export function checkRunsOnInjection(workflow, rawContent, filename) {
       id:          `runs-on-injection-${filename}-${jobId}`,
       rule:        'runs-on-injection',
       severity,
-      title:       `\`runs-on\` Value Controlled by Untrusted Input in Job \`${jobId}\``,
+      title:       `\`runs-on\` Value Controlled by Untrusted External Input in Job \`${jobId}\``,
       file:        filename,
       line:        lineNumber,
       snippet,
       context:     `Job: \`${jobName}\`  ·  runs-on: \`${runsOnStr}\``,
-      detail:      `The \`runs-on:\` label for job \`${jobId}\` is dynamically constructed from event data or user inputs. GitHub matches runner labels exactly — if an attacker controls the label, they can route the job to a malicious self-hosted runner they control. The job then executes on attacker infrastructure with full access to all secrets and the GITHUB_TOKEN.`,
-      exploit:     `An attacker creates a self-hosted runner registered to their own repository or org with a crafted label. They then submit a PR or trigger an event that sets the label to match their runner. The workflow job is dispatched to the attacker's runner, which runs arbitrary code and has full access to all job secrets.`,
-      impact:      'Job Hijacking → Attacker-Controlled Runner Executes with Secret Access',
-      remediation: `Never use dynamic expressions in \`runs-on:\`. Use a static, allowlisted runner label:\n\nruns-on: ubuntu-latest\n\nIf multiple runner types are needed, use a static matrix or a conditional:\n\nruns-on: \${{ matrix.os == 'windows' && 'windows-latest' || 'ubuntu-latest' }}\n\nNever expose external inputs directly as the runner label.`,
-      cvss:        { score: severity === 'critical' ? 9.8 : 8.1, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H', cwe: 'CWE-99' },
+      detail:      `The \`runs-on:\` label for job \`${jobId}\` is dynamically constructed from attacker-controlled event data (e.g. PR title, branch name, issue body). GitHub matches runner labels exactly — if an attacker controls the label value, they can route the job to a malicious self-hosted runner they register. The job then executes on attacker infrastructure with full access to all secrets and the GITHUB_TOKEN.`,
+      exploit:     `An attacker registers a self-hosted runner with a label crafted to match the dynamic expression outcome. They submit a PR or open an issue that sets the runs-on value to match their runner label. The job is dispatched to the attacker-controlled machine, which exfiltrates all secrets and the GITHUB_TOKEN.`,
+      impact:      'Job Hijacking — Attacker-Controlled Runner Executes with Secret Access',
+      remediation: `Never derive \`runs-on:\` from untrusted event data. Use a static label or a hardcoded conditional:\n\nruns-on: ubuntu-latest\n\nIf OS variants are needed, use a static strategy matrix defined in the workflow file, not from event inputs.`,
+      cvss:        { score: isFromPrEvent ? 9.8 : 8.1, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H', cwe: 'CWE-99' },
     });
   }
 

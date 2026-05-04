@@ -147,7 +147,13 @@ export default function ScanInput({ user, token, rateLimit, onScan, onBatchScan 
               onClick={async () => {
                 setBatchLoading(true);
                 try {
-                  const { repos } = await listUserRepos(token);
+                  const { repos } = await listUserRepos(token, 50);
+                  if (repos.length > 20) {
+                    const ok = window.confirm(
+                      `Scan ${repos.length} repositories? This will use ~${repos.length * 15} API calls and may take several minutes.`
+                    );
+                    if (!ok) { setBatchLoading(false); return; }
+                  }
                   onBatchScan(repos);
                 } catch {
                   setBatchLoading(false);

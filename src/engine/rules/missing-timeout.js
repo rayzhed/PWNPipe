@@ -1,6 +1,5 @@
 import { findLineNumber, extractSnippet } from '../yaml-parser.js';
 
-// Triggers that can be activated externally — these are the ones worth flagging
 const EXTERNAL_TRIGGERS = new Set([
   'push', 'pull_request', 'pull_request_target', 'workflow_run',
   'issue_comment', 'issues', 'discussion', 'discussion_comment',
@@ -18,32 +17,37 @@ function hasExternalTrigger(on) {
 export function checkMissingTimeout(workflow, rawContent, filename) {
   if (!hasExternalTrigger(workflow?.on)) return [];
 
-  const findings = [];
   const jobs = workflow?.jobs ?? {};
+  const jobEntries = Object.entries(jobs);
+  if (jobEntries.length === 0) return [];
 
-  for (const [jobId, job] of Object.entries(jobs)) {
-    if (job['timeout-minutes'] !== undefined && job['timeout-minutes'] !== null) continue;
+  // Collect jobs missing timeout-minutes
+  const missingJobs = jobEntries
+    .filter(([, job]) => job['timeout-minutes'] === undefined || job['timeout-minutes'] === null)
+    .map(([id, job]) => job.name ?? id);
 
-    const jobName = job.name ?? jobId;
-    const lineNumber = findLineNumber(rawContent, `${jobId}:`) || findLineNumber(rawContent, 'runs-on:');
-    const snippet = extractSnippet(rawContent, lineNumber, 3);
+  if (missingJobs.length === 0) return [];
 
-    findings.push({
-      id:          `missing-timeout-${filename}-${jobId}`,
-      rule:        'missing-timeout',
-      severity:    'low',
-      title:       `Job \`${jobId}\` Has No \`timeout-minutes\``,
-      file:        filename,
-      line:        lineNumber,
-      snippet,
-      context:     `Job: \`${jobName}\`  ·  Default timeout: 360 minutes`,
-      detail:      `Job \`${jobId}\` does not set \`timeout-minutes\`. GitHub's default job timeout is 360 minutes (6 hours). A hung step — caused by a dependency waiting for a lock, a flaky network call, or a deliberate denial-of-service via malicious input — will consume runner minutes for up to 6 hours before being killed.`,
-      exploit:     `An attacker submits a PR that triggers this workflow with an input that causes a step to hang indefinitely (e.g., a network request to a controlled endpoint that never responds). Without a timeout, the job consumes org-level runner minutes until the 6-hour GitHub limit is hit. Repeated over many PRs, this exhausts CI capacity.`,
-      impact:      'Denial of Service / CI Cost Exhaustion',
-      remediation: `Set an appropriate \`timeout-minutes\` on the job:\n\njobs:\n  ${jobId}:\n    timeout-minutes: 30\n\nChoose a value that gives the job enough time under normal conditions but limits damage from stuck runs.`,
-      cvss:        { score: 3.7, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L', cwe: 'CWE-400' },
-    });
-  }
+  const lineNumber = findLineNumber(rawContent, /^on:/);
+  const snippet = extractSnippet(rawContent, lineNumber, 3);
 
-  return findings;
+  const jobList = missingJobs.length <= 4
+    ? missingJobs.map(n => `\`${n}\``).join(', ')
+    : `${missingJobs.slice(0, 3).map(n => `\`${n}\``).join(', ')} and ${missingJobs.length - 3} more`;
+
+  return [{
+    id:          `missing-timeout-${filename}`,
+    rule:        'missing-timeout',
+    severity:    'low',
+    title:       `${missingJobs.length} Job${missingJobs.length > 1 ? 's' : ''} Without \`timeout-minutes\` (Default: 6h)`,
+    file:        filename,
+    line:        lineNumber,
+    snippet,
+    context:     `Jobs: ${jobList}`,
+    detail:      `${missingJobs.length === jobEntries.length ? 'None' : `${missingJobs.length} of ${jobEntries.length}`} of this workflow's jobs set \`timeout-minutes\`. GitHub's default is 360 minutes (6 hours). A hung step — caused by a dependency waiting for a lock, a flaky network call, or a deliberate denial-of-service via malicious input — will consume runner minutes for up to 6 hours before being killed.`,
+    exploit:     `An attacker submits a PR that triggers this workflow with an input causing a step to hang indefinitely (e.g., a network request to a controlled endpoint that never responds). Without a timeout, the job consumes CI minutes until GitHub's 6-hour limit. Repeated across many PRs this exhausts org-level runner capacity.`,
+    impact:      'Denial of Service / CI Cost Exhaustion via Hung Jobs',
+    remediation: `Set \`timeout-minutes\` on each job to a value generous enough for normal runs but tight enough to limit stuck runs:\n\njobs:\n  build:\n    timeout-minutes: 30`,
+    cvss:        { score: 3.7, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L', cwe: 'CWE-400' },
+  }];
 }
