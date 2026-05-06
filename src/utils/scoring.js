@@ -21,31 +21,46 @@ const CVSS_BASE = {
 /**
  * Compute the aggregate CVSS-aligned risk score (0.0–10.0) for a set of findings.
  *
- * Method: start from the highest individual finding score, then apply a secondary
- * factor for finding density and combo multipliers — matching how CVSS environmental
- * scoring raises a base score when multiple attack paths exist.
+ * Only CONFIRMED and HIGH confidence findings drive the score.
+ * MEDIUM and LOW confidence findings are informational — they appear in the UI
+ * but do not raise the score, preventing unverified heuristics from inflating risk.
+ *
+ * Method: start from the highest individual finding score among confirmed findings,
+ * then apply a secondary factor for finding density and combo multipliers.
  */
 export function calculateScore(findings) {
   if (!findings || findings.length === 0) return 0.0;
 
-  // Use per-finding CVSS score when available, fall back to severity-tier default
-  let base = Math.max(...findings.map(f => f.cvss?.score ?? CVSS_BASE[f.severity] ?? 0));
+  // Only score-eligible findings: CONFIRMED or HIGH confidence.
+  // Findings without a confidence field (edge case) default to eligible.
+  const SCORING_CONFIDENCE = new Set(['CONFIRMED', 'HIGH']);
+  const scoreable = findings.filter(
+    f => !f.confidence || SCORING_CONFIDENCE.has(f.confidence)
+  );
 
-  // Secondary density factor: count unique high/critical RULE TYPES, not individual
-  // findings. 10 unpinned-action findings are still one vulnerability class.
+  if (scoreable.length === 0) return 0.0;
+
+  // Use per-finding CVSS score when available, fall back to severity-tier default
+  let base = Math.max(...scoreable.map(f => f.cvss?.score ?? CVSS_BASE[f.severity] ?? 0));
+
+  // Secondary density factor: count unique high/critical scoreable RULE TYPES.
+  // 10 unpinned-action findings are still one vulnerability class.
   const highRules = new Set(
-    findings
+    scoreable
       .filter(f => f.severity === 'critical' || f.severity === 'high')
       .map(f => f.rule)
   );
-  const densityBonus = Math.min(0.8, (highRules.size - 1) * 0.15);
+  const densityBonus = Math.max(0, Math.min(0.8, (highRules.size - 1) * 0.15));
   base = Math.min(10.0, base + densityBonus);
 
-  // Combo multipliers — chained attacks raise the effective score
-  const rules = new Set(findings.map(f => f.rule));
+  // Combo multipliers — chained attacks raise the effective score.
+  // Only count rules that have at least one scoreable finding.
+  const scoreableRules = new Set(scoreable.map(f => f.rule));
+  const rules = scoreableRules;
 
   // Pwn request chain: RCE via expression injection + privileged trigger context
-  if (rules.has('template-injection') &&
+  if ((rules.has('template-injection') || rules.has('github-output-injection') ||
+       rules.has('matrix-injection') || rules.has('runs-on-injection')) &&
      (rules.has('dangerous-trigger') || rules.has('workflow-run-trigger'))) {
     base = Math.min(10.0, base + 0.2);
   }

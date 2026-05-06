@@ -295,11 +295,25 @@ export async function verifyCommitInRepo(owner, repo, sha, token) {
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
+  // Step 1: confirm the repo itself is accessible.
+  // Returns repoExists: false when the repo is gone, private, or org was renamed —
+  // the caller can emit a lower-confidence "possible" finding rather than dropping it.
+  let repoResp;
+  try {
+    repoResp = await fetch(`${GITHUB_API}/repos/${owner}/${repo}`, { headers });
+  } catch {
+    return { exists: null, repoExists: null, rateLimit: null };
+  }
+  if (repoResp.status !== 200) {
+    return { exists: null, repoExists: false, rateLimit: null };
+  }
+
+  // Step 2: check the specific commit.
   let response;
   try {
     response = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/commits/${sha}`, { headers });
   } catch {
-    return { exists: null, rateLimit: null };
+    return { exists: null, repoExists: true, rateLimit: null };
   }
 
   const rateLimit = {
@@ -308,10 +322,9 @@ export async function verifyCommitInRepo(owner, repo, sha, token) {
     reset: parseInt(response.headers.get('X-RateLimit-Reset') ?? '0', 10),
   };
 
-  if (response.status === 200) return { exists: true, rateLimit };
-  if (response.status === 404 || response.status === 422) return { exists: false, rateLimit };
-  // 403 = rate limit or permission issue — treat as unknown
-  return { exists: null, rateLimit };
+  if (response.status === 200) return { exists: true,  repoExists: true, rateLimit };
+  if (response.status === 404 || response.status === 422) return { exists: false, repoExists: true, rateLimit };
+  return { exists: null, repoExists: true, rateLimit };
 }
 
 /**

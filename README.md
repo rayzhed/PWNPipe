@@ -4,6 +4,19 @@ GitHub Actions static analyzer. Scans any public repository's workflow files for
 
 https://rayzhed.github.io/PWNPipe/
 
+## Use cases & MVP
+
+**Target users:** security engineers, DevSecOps practitioners, and open-source maintainers who need to audit GitHub Actions workflows without installing anything locally.
+
+**User journeys:**
+- As a security engineer, I scan any public repo without authenticating and get a risk report in under 30 seconds, so I can triage CI/CD attack surface quickly.
+- As a DevSecOps practitioner, I log in with GitHub OAuth to scan private repos and export findings as SARIF for direct upload to the GitHub Security tab.
+- As an open-source maintainer, I run a batch scan across all my repositories to surface supply chain risks at a glance and prioritise remediation.
+
+**MVP scope:** detect the 20 highest-impact GitHub Actions misconfigurations (template injection, unpinned actions, excessive permissions, hardcoded secrets) across public repos, and display each finding with a CVSS score and remediation steps.
+
+Everything beyond that — private repo access, network enrichment, batch scanning, multi-format export, SARIF — is a post-MVP layer built on top.
+
 ## Compliance & reporting
 
 Every finding includes a **CVSS v3.1 base score + vector**, **CWE ID**, **CVE references** where applicable, **OWASP CI/CD Security Top 10** category, and a detection confidence level (CONFIRMED / HIGH / MEDIUM / LOW).
@@ -22,7 +35,7 @@ Export formats from the results page:
 | Full Report Card (PNG) | All findings as a shareable image |
 | Print / PDF | Browser print — findings expand automatically |
 
-## Rules (55)
+## Rules (58)
 
 | Rule | OWASP | Confidence |
 |---|---|---|
@@ -76,6 +89,9 @@ Export formats from the results page:
 | Branch protection disabled on default branch (network) | CICD-SEC-2 | CONFIRMED |
 | GitHub Secret Scanning disabled (network) | CICD-SEC-10 | CONFIRMED |
 | Secret Scanning Push Protection disabled (network) | CICD-SEC-10 | CONFIRMED |
+| `if:` condition always true (mixed `${{ }}` + comparison outside delimiters) | CICD-SEC-2 | CONFIRMED |
+| `issue_comment` / PR review TOCTOU - mutable checkout ref | CICD-SEC-4 | CONFIRMED |
+| GitHub App token with revocation disabled (`skip-token-revoke: true`) | CICD-SEC-6 | CONFIRMED |
 | Batch multi-repo scan with aggregate risk table | - | - |
 
 ## Architecture
@@ -87,6 +103,16 @@ Browser (React + Vite)
 ```
 
 Analysis runs entirely in the browser. No scan data is sent anywhere.
+
+## Technical choices
+
+**React 18 + Vite** — React's component model maps cleanly onto the multi-phase UI (login → scan → results). Vite gives sub-second HMR and tree-shakes the 58-rule engine down to a lean production bundle. A vanilla JS approach would have required re-implementing state management from scratch; a heavier meta-framework (Next.js, Remix) would add server-side infrastructure requirements that conflict with the deliberately server-less, privacy-first design.
+
+**Tailwind CSS + Radix UI** — Tailwind provides a consistent dark-mode design system through CSS variables with no runtime overhead, keeping the bundle small. Radix UI handles accessible collapsible/disclosure patterns for finding cards (keyboard navigation, ARIA attributes) that would otherwise require significant manual ARIA work.
+
+**Cloudflare Workers** — The OAuth `client_secret` must never reach the browser. A Cloudflare Worker is the minimal viable backend: a single edge function with no persistent state, zero cold-start latency, and a free tier sufficient for expected traffic. The alternative (Netlify Functions, Vercel Serverless) would work equally well; Cloudflare was chosen for the `wrangler` developer experience and its built-in secret management via `wrangler secret put`.
+
+**GitHub Pages** — Static hosting that matches the zero-server architecture. HTTPS and global CDN are included at no cost. The SPA routing limitation (GitHub Pages has no dynamic routes) is handled with the standard 404 → `index.html` redirect already in `public/404.html`.
 
 ## Local dev
 

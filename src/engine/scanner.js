@@ -55,6 +55,9 @@ import {
   checkContinueOnError,
   checkRenovateAutomerge,
   checkPreCommitUnsafe,
+  checkIfAlwaysTrue,
+  checkIssueCommentTOCTOU,
+  checkGithubAppUnsafe,
 } from './rules/index.js';
 
 const WORKFLOW_RULES = [
@@ -106,6 +109,12 @@ const WORKFLOW_RULES = [
   // Resilience / visibility
   checkMissingTimeout,
   checkContinueOnError,
+  // Authorization logic — condition bypass
+  checkIfAlwaysTrue,
+  // TOCTOU / trigger misuse
+  checkIssueCommentTOCTOU,
+  // Third-party integrations
+  checkGithubAppUnsafe,
 ];
 
 // Rules that work on raw YAML content — also applied to action.yml files
@@ -203,34 +212,63 @@ async function runNetworkRules(workflows, token, onProgress) {
   }
 
   for (const [shaKey, shaGroup] of uniqueShas) {
-    const atIdx    = shaKey.lastIndexOf('@');
+    const atIdx     = shaKey.lastIndexOf('@');
     const ownerRepo = shaKey.slice(0, atIdx);
     const sha       = shaKey.slice(atIdx + 1);
     const [owner, repo] = ownerRepo.split('/');
-    let exists = null;
+    let exists = null, repoExists = null;
     try {
       const result = await verifyCommitInRepo(owner, repo, sha, token);
-      exists = result.exists;
+      exists     = result.exists;
+      repoExists = result.repoExists;
     } catch { /* skip */ }
-    if (exists !== false) continue;
 
-    for (const r of shaGroup) {
+    // Confirmed impostor: repo is accessible but this SHA is not in it
+    if (exists === false) {
+      for (const r of shaGroup) {
+        const lineNumber = findLineNumber(r.rawContent, r.ref.slice(0, 20));
+        const snippet    = extractSnippet(r.rawContent, lineNumber, 4);
+        findings.push({
+          id:          `impostor-commit-${r.file}-${r.ref}`,
+          rule:        'impostor-commit',
+          severity:    'critical',
+          title:       `Impostor Commit: SHA not reachable in \`${ownerRepo}\``,
+          file:        r.file,
+          line:        lineNumber,
+          snippet,
+          context:     `Action: \`${r.uses}\`  ·  SHA: \`${sha}\``,
+          detail:      `The commit SHA \`${sha}\` is not reachable from any branch or tag of \`${ownerRepo}\`. This is a confirmed impostor commit: the SHA exists in GitHub's shared fork object pool but was never merged into the canonical repository.`,
+          exploit:     `An attacker forks \`${ownerRepo}\`, crafts a commit whose SHA matches, and waits for any pipeline to reference it. Because GitHub's object pool is shared across all forks, the SHA resolves but executes attacker-controlled code with full access to secrets.`,
+          impact:      'Supply Chain RCE — Attacker-Controlled Code in CI with Secret Access',
+          remediation: `Verify the correct SHA for the intended version at \`https://github.com/${ownerRepo}/releases\` and update the \`uses:\` reference.`,
+          cvss: { score: 9.3, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H', cwe: 'CWE-829' },
+        });
+      }
+      continue;
+    }
+
+    // Unverifiable: repo returned 404 — deleted, renamed, or private.
+    // The old name may be available for registration (name-squatting risk).
+    if (repoExists === false) {
+      // Deduplicate to one finding per ownerRepo — all steps share the same root risk
+      const r = shaGroup[0];
       const lineNumber = findLineNumber(r.rawContent, r.ref.slice(0, 20));
       const snippet    = extractSnippet(r.rawContent, lineNumber, 4);
+      const allUses    = [...new Set(shaGroup.map(x => x.uses))].join(', ');
       findings.push({
-        id:          `impostor-commit-${r.file}-${r.ref}`,
+        id:          `impostor-commit-unverifiable-${ownerRepo.replace('/', '-')}`,
         rule:        'impostor-commit',
-        severity:    'critical',
-        title:       `Impostor commit: SHA not found in \`${ownerRepo}\``,
+        severity:    'medium',
+        title:       `Possibly Vulnerable: \`${ownerRepo}\` is inaccessible (renamed, deleted, or private)`,
         file:        r.file,
         line:        lineNumber,
         snippet,
-        context:     `Action: \`${r.uses}\`  ·  SHA: \`${sha}\``,
-        detail:      `The commit SHA \`${sha}\` pinned in \`${ownerRepo}\` is not reachable from any branch or tag of that repository. This is a strong sign of an impostor commit: a commit that exists in GitHub's shared fork object pool but was never merged into the canonical repo.`,
-        exploit:     `An attacker creates a fork of \`${ownerRepo}\`, crafts a malicious commit in it, and waits for a pipeline to reference that SHA. Because GitHub's object pool is shared across all forks, the SHA resolves but executes attacker-controlled code with full access to secrets.`,
-        impact:      'Supply Chain RCE: Attacker-Controlled Code Executes in CI with Secret Access',
-        remediation: `Verify the correct SHA for the intended version tag at \`https://github.com/${ownerRepo}/releases\` and update the \`uses:\` reference to that SHA.`,
-        cvss: { score: 9.3, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H', cwe: 'CWE-829' },
+        context:     `Action(s): \`${allUses}\`  ·  SHA: \`${sha}\``,
+        detail:      `The repository \`${ownerRepo}\` referenced in \`uses:\` returned 404. It may have been renamed, deleted, or made private. If the org or repo name is no longer registered, a malicious actor could register it and serve arbitrary action code under the same path. The SHA pin provides partial protection but does not prevent the name from being squatted.`,
+        exploit:     `If \`${ownerRepo}\` is deleted or the org is renamed: an attacker registers the same org/repo name on GitHub, creates \`${ownerRepo}\`, and pushes any action code. Workflows that do NOT verify the SHA before fetching (or where the SHA becomes reachable via fork object-pool tricks) would execute attacker code.`,
+        impact:      'Possible Supply Chain Risk — Unverifiable Action Source',
+        remediation: `1. Locate the current canonical URL for this action (it may have been renamed).\n2. Update the \`uses:\` reference to the new org/repo name.\n3. Re-pin to a fresh SHA from the canonical repository.\n4. If the original repo is gone with no successor, remove or replace this action.`,
+        cvss: { score: 5.9, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N', cwe: 'CWE-829' },
       });
     }
   }

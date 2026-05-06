@@ -48,7 +48,7 @@ export const RULE_META = {
   'dependabot-missing-cooldown':     { owasp: 'CICD-SEC-3', confidence: 'LOW'       },
   'use-trusted-publishing':          { owasp: 'CICD-SEC-6', confidence: 'MEDIUM'    },
   'archived-uses':                        { owasp: 'CICD-SEC-3', confidence: 'CONFIRMED' },
-  'impostor-commit':                      { owasp: 'CICD-SEC-3', confidence: 'CONFIRMED' },
+  'impostor-commit':                      { owasp: 'CICD-SEC-3', confidence: (f) => f.severity === 'critical' ? 'CONFIRMED' : 'MEDIUM' },
   'ref-version-mismatch':                 { owasp: 'CICD-SEC-3', confidence: 'MEDIUM'    },
   'action-yml-template-injection':        { owasp: 'CICD-SEC-4', confidence: 'HIGH'      },
   'action-yml-unpinned-uses':             { owasp: 'CICD-SEC-3', confidence: 'CONFIRMED' },
@@ -73,4 +73,7 @@ export const RULE_META = {
   'repo-branch-protection':              { owasp: 'CICD-SEC-2', confidence: 'CONFIRMED' },
   'repo-secret-scanning':               { owasp: 'CICD-SEC-10', confidence: 'CONFIRMED' },
   'repo-push-protection':               { owasp: 'CICD-SEC-10', confidence: 'CONFIRMED' },
+  'if-always-true':                     { owasp: 'CICD-SEC-2', confidence: 'CONFIRMED' },
+  'issue-comment-toctou':               { owasp: 'CICD-SEC-4', confidence: 'CONFIRMED' },
+  'github-app-unsafe':                  { owasp: 'CICD-SEC-6', confidence: 'CONFIRMED' },
 };

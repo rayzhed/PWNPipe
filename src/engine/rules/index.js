@@ -42,3 +42,6 @@ export { checkMissingTimeout }                    from './missing-timeout.js';
 export { checkContinueOnError }                   from './continue-on-error.js';
 export { checkRenovateAutomerge }                 from './renovate-automerge.js';
 export { checkPreCommitUnsafe }                   from './pre-commit-unsafe.js';
+export { checkIfAlwaysTrue }                      from './if-always-true.js';
+export { checkIssueCommentTOCTOU }                from './issue-comment-toctou.js';
+export { checkGithubAppUnsafe }                   from './github-app-unsafe.js';
