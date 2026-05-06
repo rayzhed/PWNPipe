@@ -7,11 +7,10 @@ const WRITE_PERMISSIONS = [
 ];
 
 function isWriteAll(perms) {
-  if (typeof perms === 'string') return perms === 'write-all';
-  if (typeof perms === 'object' && perms !== null) {
-    return Object.values(perms).every(v => v === 'write');
-  }
-  return false;
+  // The object-with-all-write case was removed — it produced false positives on
+  // legitimately scoped objects that happen to set all used keys to 'write'.
+  // Overly-broad objects are still caught by countWritePerms() > 2 below.
+  return typeof perms === 'string' && perms === 'write-all';
 }
 
 function countWritePerms(perms) {

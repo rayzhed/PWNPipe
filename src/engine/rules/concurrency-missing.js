@@ -57,7 +57,7 @@ export function checkConcurrencyMissing(workflow, rawContent, filename) {
     rule: 'concurrency-missing',
     severity: 'medium',
     title: 'Deploy/Write Workflow Missing Concurrency Control',
-    file: `.github/workflows/${filename}`,
+    file: filename,
     line: lineNumber,
     snippet,
     context: 'Workflow-level — no concurrency: block found',

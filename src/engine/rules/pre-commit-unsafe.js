@@ -58,7 +58,7 @@ export function checkPreCommitUnsafe(parsed, rawContent, filePath) {
       exploit:     `An attacker with write access to \`${repo.repo}\` force-moves the \`${rev}\` tag to a commit with a malicious hook. The next CI run installs and runs it with secret access.`,
       impact:      'Unpinned Hook Repo Can Silently Change',
       remediation: `Pin to a full SHA commit:\n\n- repo: ${repo.repo}\n  rev: <FULL_40_CHAR_SHA>  # ${rev}\n\nVerify the SHA at the time of pinning corresponds to the intended version.`,
-      cvss:        { score: 4.2, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N', cwe: 'CWE-829' },
+      cvss:        { score: 3.3, vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N', cwe: 'CWE-829' },
     });
   }
 
