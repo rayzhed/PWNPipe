@@ -6,12 +6,17 @@ import { cn } from '@/lib/utils';
 const SCAN_STEPS = [
   'Connecting to GitHub API',
   'Fetching workflow files',
+  'Fetching action files',
+  'Fetching dependabot config',
+  'Fetching renovate / pre-commit config',
   'Parsing YAML',
   'Checking dangerous triggers',
   'Detecting template injections',
   'Verifying action pinning',
   'Auditing GITHUB_TOKEN permissions',
   'Running additional checks',
+  'Network enrichment checks',
+  'Checking repository security settings',
   'Calculating risk score',
 ];
 

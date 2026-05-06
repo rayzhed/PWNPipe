@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, MapPin } from 'lucide-react';
+import { ChevronDown, MapPin, Info } from 'lucide-react';
 import {
   Collapsible,
   CollapsibleTrigger,
@@ -51,10 +51,10 @@ const SEVERITY = {
 };
 
 const CONFIDENCE_STYLE = {
-  CONFIRMED: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+  CONFIRMED: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400',
   HIGH:      'border-blue-500/40    bg-blue-500/10    text-blue-400',
-  MEDIUM:    'border-amber-500/40   bg-amber-500/10   text-amber-400',
-  LOW:       'border-gray-500/30    bg-gray-500/10    text-gray-400',
+  MEDIUM:    'border-amber-500/40   bg-amber-500/10   text-amber-500',
+  LOW:       'border-gray-500/30    bg-gray-500/8     text-gray-400',
 };
 
 const OWASP_URL = {
@@ -113,7 +113,6 @@ function ReferenceBadges({ rep }) {
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        {/* Confidence */}
         {rep.confidence && (
           <span className={cn(
             'rounded border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider',
@@ -122,7 +121,6 @@ function ReferenceBadges({ rep }) {
             {rep.confidence}
           </span>
         )}
-        {/* OWASP CI/CD */}
         {rep.owasp && (
           <a
             href={OWASP_URL[rep.owasp] ?? '#'}
@@ -134,7 +132,6 @@ function ReferenceBadges({ rep }) {
             {rep.owasp}
           </a>
         )}
-        {/* CWE */}
         {rep.cvss?.cwe && (
           <a
             href={`https://cwe.mitre.org/data/definitions/${rep.cvss.cwe.replace('CWE-', '')}.html`}
@@ -145,7 +142,6 @@ function ReferenceBadges({ rep }) {
             {rep.cvss.cwe}
           </a>
         )}
-        {/* CVE badges */}
         {rep.cvss?.cve?.map(id => (
           <a
             key={id}
@@ -158,7 +154,6 @@ function ReferenceBadges({ rep }) {
           </a>
         ))}
       </div>
-      {/* CVSS vector string — selectable for copy-paste into reports */}
       {rep.cvss?.vector && (
         <p className="select-all font-mono text-[10px] text-muted-foreground/40">
           {rep.cvss.vector}
@@ -211,7 +206,9 @@ function OccurrenceRow({ finding, s }) {
 
 // --- Main card ------------------------------------------------------------
 
-export default function FindingCard({ group }) {
+// informational=true → MEDIUM/LOW confidence: doesn't affect score.
+// Visual treatment is muted to communicate lower urgency without hiding the finding.
+export default function FindingCard({ group, informational = false }) {
   const rep   = group.findings[0];
   const rest  = group.findings.slice(1);
   const s     = SEVERITY[group.severity] ?? SEVERITY.low;
@@ -221,46 +218,67 @@ export default function FindingCard({ group }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="mb-2.5">
-      <div className={cn('rounded-lg border bg-card transition-colors', open ? s.border : 'border-border')}>
+    <Collapsible open={open} onOpenChange={setOpen} className="mb-2">
+      <div className={cn(
+        'rounded-lg border bg-card transition-colors',
+        informational
+          ? open ? 'border-border/60' : 'border-border/40'
+          : open ? s.border : 'border-border/60'
+      )}>
 
         {/* Header */}
         <CollapsibleTrigger asChild>
           <button className={cn(
             'flex w-full items-start gap-3 rounded-t-lg p-4 text-left transition-colors',
-            open ? s.headerBg : 'hover:bg-muted/40'
+            informational
+              ? open ? 'bg-muted/20' : 'hover:bg-muted/20'
+              : open ? s.headerBg : 'hover:bg-muted/30'
           )}>
-            <Badge variant={s.badge} className="mt-0.5 shrink-0 uppercase">
+            <Badge
+              variant={s.badge}
+              className={cn('mt-0.5 shrink-0 uppercase', informational && 'opacity-60')}
+            >
               {group.severity}
             </Badge>
 
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-snug text-foreground">
+              <p className={cn(
+                'text-sm font-semibold leading-snug',
+                informational ? 'text-foreground/70' : 'text-foreground'
+              )}>
                 {group.title}
               </p>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span className="font-mono text-[11px] text-muted-foreground">
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-mono text-[11px] text-muted-foreground/60">
                   {count > 1
                     ? `${count} occurrences · ${rep.file}${rep.line ? `:${rep.line}` : ''}`
                     : `${rep.file}${rep.line ? `:${rep.line}` : ''}`
                   }
                 </span>
-                {/* Inline confidence + OWASP in header for quick scanning */}
                 {rep.owasp && (
-                  <span className="font-mono text-[10px] text-violet-400/70">{rep.owasp}</span>
+                  <span className="font-mono text-[10px] text-violet-400/60">{rep.owasp}</span>
+                )}
+                {/* Confidence badge — always visible in header */}
+                {rep.confidence && (
+                  <span className={cn(
+                    'rounded border px-1.5 py-px font-mono text-[9px] font-semibold uppercase tracking-wide',
+                    CONFIDENCE_STYLE[rep.confidence] ?? CONFIDENCE_STYLE.MEDIUM
+                  )}>
+                    {rep.confidence}
+                  </span>
                 )}
               </div>
             </div>
 
             <span className={cn(
               'shrink-0 rounded border px-2 py-0.5 font-mono text-[11px] font-bold',
-              cvssChipStyle(score)
+              informational ? 'border-border/40 text-muted-foreground/50 bg-transparent' : cvssChipStyle(score)
             )}>
               {score.toFixed(1)}
             </span>
 
             <ChevronDown className={cn(
-              'mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-200',
+              'mt-0.5 size-4 shrink-0 text-muted-foreground/40 transition-transform duration-200',
               open && 'rotate-180'
             )} />
           </button>
@@ -268,37 +286,54 @@ export default function FindingCard({ group }) {
 
         {/* Body */}
         <CollapsibleContent forceMount className="print-expand overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:h-0">
-          <div className={cn('border-t px-4 pb-4 pt-3 space-y-4', s.border)}>
+          <div className={cn(
+            'border-t px-4 pb-4 pt-3 space-y-4',
+            informational ? 'border-border/40' : s.border
+          )}>
 
-            {/* Context */}
+            {/* Informational notice */}
+            {informational && (
+              <div className="flex items-start gap-2 rounded-md border border-border/40 bg-muted/20 px-3 py-2">
+                <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
+                <p className="font-mono text-[11px] text-muted-foreground/60 leading-relaxed">
+                  This finding has <span className="font-semibold">{rep.confidence}</span> confidence — it does not affect the risk score and may require manual verification.
+                </p>
+              </div>
+            )}
+
             {rep.context && (
-              <p className="border-b border-border pb-2 font-mono text-[11px] text-muted-foreground">
+              <p className="border-b border-border/40 pb-2 font-mono text-[11px] text-muted-foreground">
                 {rep.context}
               </p>
             )}
 
-            {/* Detail */}
             {rep.detail && (
               <p className="text-sm leading-7 text-muted-foreground">
                 {rep.detail}
               </p>
             )}
 
-            {/* References: confidence · OWASP · CWE · CVE · CVSS vector */}
             <ReferenceBadges rep={rep} />
 
-            {/* First occurrence code snippet */}
             <CodeSnippet snippet={rep.snippet} />
 
-            {/* Exploit scenario */}
             {rep.exploit && (
-              <div className={cn('rounded-r-lg border-l-2 py-3 pl-4 pr-4', s.exploitBg)}>
+              <div className={cn(
+                'rounded-r-lg border-l-2 py-3 pl-4 pr-4',
+                informational ? 'bg-muted/20 border-l-border' : s.exploitBg
+              )}>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <span className={cn('font-mono text-[10px] font-bold uppercase tracking-widest', s.exploitLabel)}>
+                  <span className={cn(
+                    'font-mono text-[10px] font-bold uppercase tracking-widest',
+                    informational ? 'text-muted-foreground/50' : s.exploitLabel
+                  )}>
                     Exploit Scenario
                   </span>
                   {rep.impact && (
-                    <span className={cn('rounded-full border px-2 py-0.5 font-mono text-[10px]', s.impactBorder)}>
+                    <span className={cn(
+                      'rounded-full border px-2 py-0.5 font-mono text-[10px]',
+                      informational ? 'border-border/40 text-muted-foreground/50' : s.impactBorder
+                    )}>
                       {rep.impact}
                     </span>
                   )}
@@ -307,10 +342,9 @@ export default function FindingCard({ group }) {
               </div>
             )}
 
-            {/* Remediation */}
             {rep.remediation && (
-              <div className="rounded-r-lg border-l-2 border-l-green-500 bg-green-500/5 py-3 pl-4 pr-4">
-                <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-green-400">
+              <div className="rounded-r-lg border-l-2 border-l-green-500/50 bg-green-500/5 py-3 pl-4 pr-4">
+                <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-green-400/70">
                   Remediation
                 </p>
                 <pre className="whitespace-pre-wrap font-mono text-xs leading-7 text-muted-foreground">
@@ -319,10 +353,9 @@ export default function FindingCard({ group }) {
               </div>
             )}
 
-            {/* Additional occurrences */}
             {rest.length > 0 && (
               <div>
-                <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
                   {rest.length} more occurrence{rest.length > 1 ? 's' : ''}
                 </p>
                 <div className="space-y-1.5">
