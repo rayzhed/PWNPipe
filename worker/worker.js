@@ -16,6 +16,12 @@ const CORS_HEADERS = (origin) => ({
   'Access-Control-Allow-Headers': 'Content-Type',
 });
 
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+};
+
 export default {
   async fetch(request, env) {
     // Fail closed — if ALLOWED_ORIGIN isn't configured, reject all cross-origin requests
@@ -24,17 +30,19 @@ export default {
     if (!origin) {
       return new Response(JSON.stringify({ error: 'Worker not configured: ALLOWED_ORIGIN secret is missing.' }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...SECURITY_HEADERS },
       });
     }
 
+    const corsAndSecurity = { ...CORS_HEADERS(origin), ...SECURITY_HEADERS };
+
     // CORS preflight
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS_HEADERS(origin) });
+      return new Response(null, { status: 204, headers: corsAndSecurity });
     }
 
     if (request.method !== 'POST') {
-      return new Response('Method Not Allowed', { status: 405 });
+      return new Response('Method Not Allowed', { status: 405, headers: SECURITY_HEADERS });
     }
 
     let code;
@@ -44,14 +52,14 @@ export default {
     } catch {
       return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS(origin) },
+        headers: { 'Content-Type': 'application/json', ...corsAndSecurity },
       });
     }
 
-    if (!code) {
-      return new Response(JSON.stringify({ error: 'Missing "code" field' }), {
+    if (typeof code !== 'string' || code.length < 10 || code.length > 200) {
+      return new Response(JSON.stringify({ error: 'Invalid "code" field' }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS(origin) },
+        headers: { 'Content-Type': 'application/json', ...corsAndSecurity },
       });
     }
 
@@ -72,7 +80,7 @@ export default {
     if (!ghResponse.ok) {
       return new Response(JSON.stringify({ error: 'GitHub OAuth endpoint error' }), {
         status: 502,
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS(origin) },
+        headers: { 'Content-Type': 'application/json', ...corsAndSecurity },
       });
     }
 
@@ -81,13 +89,13 @@ export default {
     if (data.error) {
       return new Response(JSON.stringify({ error: data.error_description ?? data.error }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS(origin) },
+        headers: { 'Content-Type': 'application/json', ...corsAndSecurity },
       });
     }
 
     return new Response(JSON.stringify({ access_token: data.access_token }), {
       status: 200,
-      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS(origin) },
+      headers: { 'Content-Type': 'application/json', ...corsAndSecurity },
     });
   },
 };

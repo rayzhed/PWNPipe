@@ -7,6 +7,18 @@ import { parseRepoInput } from '@/engine/github-api.js';
 import RepoList from '@/components/RepoList.jsx';
 import { listUserRepos } from '@/engine/github-api.js';
 
+// GitHub username: 1–39 chars, alphanumeric or hyphens, no leading/trailing hyphen
+const OWNER_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
+// GitHub repo name: 1–100 chars, alphanumeric, hyphens, underscores, dots
+const REPO_RE  = /^[a-zA-Z0-9._-]{1,100}$/;
+
+function validateRepo(parsed) {
+  if (!parsed) return 'Enter "owner/repo" or paste a GitHub URL.';
+  if (!OWNER_RE.test(parsed.owner)) return `Invalid owner name: "${parsed.owner}".`;
+  if (!REPO_RE.test(parsed.repo))   return `Invalid repository name: "${parsed.repo}".`;
+  return null;
+}
+
 export default function ScanInput({ user, token, rateLimit, onScan, onBatchScan }) {
   const [value, setValue]         = useState('');
   const [error, setError]         = useState('');
@@ -18,19 +30,20 @@ export default function ScanInput({ user, token, rateLimit, onScan, onBatchScan 
     setError('');
     // Auto-trigger when a full GitHub URL is pasted
     const parsed = parseRepoInput(v);
-    if (parsed && v.includes('github.com/')) {
+    if (parsed && v.includes('github.com/') && !validateRepo(parsed)) {
       onScan(parsed.owner, parsed.repo);
     }
   }
 
   function handleSubmit(e) {
     e.preventDefault();
-    setError('');
     const parsed = parseRepoInput(value);
-    if (!parsed) {
-      setError('Use "owner/repo" or paste a GitHub URL.');
+    const validationError = validateRepo(parsed);
+    if (validationError) {
+      setError(validationError);
       return;
     }
+    setError('');
     onScan(parsed.owner, parsed.repo);
   }
 
