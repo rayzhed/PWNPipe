@@ -33,7 +33,7 @@ export function checkSecretsOutsideEnv(workflow, rawContent, filename) {
         line: lineNumber,
         snippet,
         context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}  ·  Secret: \`secrets.${secretName}\``,
-        detail: `\`\${{ secrets.${secretName} }}\` is interpolated directly into the \`run:\` shell script. GitHub Actions masks registered secret values in logs, but masking can be defeated by string transformations (e.g., base64, URL encoding, character splitting). Injecting directly also makes the value available to any shell subprocess or debug output.`,
+        detail: `\`\${{ secrets.${secretName} }}\` is interpolated directly into the \`run:\` shell script. GitHub Actions masks registered secret values in logs, but masking can be defeated by string transformations (e.g., base64, URL encoding, character splitting).`,
         exploit: `An attacker with access to shell execution (via another vulnerability such as template injection) can extract the secret by encoding it: \`echo $SECRET | xxd | head\`. The masking only applies to the exact string value, not derivatives.`,
         impact: 'Secret Log Exposure via Masking Bypass',
         remediation: `Map secrets through \`env:\` and reference the env var in your shell script:\n\nenv:\n  MY_SECRET: \${{ secrets.${secretName} }}\nrun: |\n  echo "Using secret: $MY_SECRET"  # still masked in logs\n\nThis doesn't prevent log exposure but follows the least-exposure principle and avoids shell expansion issues.`,

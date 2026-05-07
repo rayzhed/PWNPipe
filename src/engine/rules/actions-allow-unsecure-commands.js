@@ -22,10 +22,10 @@ function checkEnvBlock(envBlock, rawContent, filename, contextLabel) {
     line: lineNumber,
     snippet,
     context: contextLabel,
-    detail: `\`ACTIONS_ALLOW_UNSECURE_COMMANDS: true\` re-enables the \`::set-env::\` and \`::add-path::\` workflow commands that GitHub deprecated and disabled in November 2020. These commands let any step inject environment variables into all subsequent steps by printing specially formatted strings to stdout — no file write required. GitHub removed them in response to GHSA-7r5p-mfr3-mhqh.`,
+    detail: `\`ACTIONS_ALLOW_UNSECURE_COMMANDS: true\` re-enables the \`::set-env::\` and \`::add-path::\` workflow commands, which GitHub disabled because they let any step inject environment variables into subsequent steps by printing formatted strings to stdout.`,
     exploit: `A compromised action or a step that processes attacker-controlled input emits \`::set-env name=NODE_OPTIONS::--require /tmp/evil.js\` to stdout. Actions parses this line and injects \`NODE_OPTIONS\` into the environment. The next Node.js step automatically loads the attacker's module, achieving code execution with full access to secrets.`,
     impact: 'Environment Variable Injection → Code Execution in Subsequent Steps',
-    remediation: `Remove \`ACTIONS_ALLOW_UNSECURE_COMMANDS: true\`. Migrate any \`::set-env::\` usage to the secure file-based approach:\n\n# Instead of: echo "::set-env name=FOO::value"\necho "FOO=value" >> $GITHUB_ENV\n\n# Instead of: echo "::add-path::/my/path"\necho "/my/path" >> $GITHUB_PATH\n\nNever write unfiltered user input to either file.`,
+    remediation: `Remove \`ACTIONS_ALLOW_UNSECURE_COMMANDS: true\`. Replace any \`::set-env::\` or \`::add-path::\` calls with the secure file-based equivalents:\n\necho "FOO=value" >> $GITHUB_ENV\necho "/my/path" >> $GITHUB_PATH\n\nNever write unfiltered user input to either file.`,
     cvss: {
       score:  8.0,
       vector: 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:L/A:N',

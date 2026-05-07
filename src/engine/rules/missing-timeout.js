@@ -44,7 +44,7 @@ export function checkMissingTimeout(workflow, rawContent, filename) {
     line:        lineNumber,
     snippet,
     context:     `Jobs: ${jobList}`,
-    detail:      `${missingJobs.length === jobEntries.length ? 'None' : `${missingJobs.length} of ${jobEntries.length}`} of this workflow's jobs set \`timeout-minutes\`. GitHub's default timeout is 360 minutes (6 hours). A hung step caused by a network call, a lock, or a malicious input will consume runner minutes for up to 6 hours.`,
+    detail:      `${missingJobs.length === jobEntries.length ? 'None' : `${missingJobs.length} of ${jobEntries.length}`} of this workflow's jobs set \`timeout-minutes\`. GitHub's default is 360 minutes — a hung step ties up a runner for up to 6 hours.`,
     exploit:     `An attacker submits a PR that triggers this workflow with an input causing a step to hang indefinitely (e.g., a network request to a controlled endpoint that never responds). Without a timeout, the job consumes CI minutes until GitHub's 6-hour limit. Repeated across many PRs this exhausts org-level runner capacity.`,
     impact:      'Denial of Service / CI Cost Exhaustion via Hung Jobs',
     remediation: `Set \`timeout-minutes\` on each job to a value generous enough for normal runs but tight enough to limit stuck runs:\n\njobs:\n  build:\n    timeout-minutes: 30`,

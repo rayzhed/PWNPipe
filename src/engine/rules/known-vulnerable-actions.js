@@ -92,7 +92,7 @@ export function checkKnownVulnerableActions(workflow, rawContent, filename) {
         context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,
         detail: vuln.description,
         exploit: `This action has a publicly disclosed vulnerability with CVSS ${vuln.cvss}. See: ${vuln.advisoryUrl}`,
-        impact: `Confirmed supply chain compromise — CVSS ${vuln.cvss}`,
+        impact: `Confirmed Supply Chain Compromise + CVSS ${vuln.cvss}`,
         remediation: `Update immediately.${fixNote}\n\nAdvisory: ${vuln.advisoryUrl}`,
         cvss: {
           score: vuln.cvss,

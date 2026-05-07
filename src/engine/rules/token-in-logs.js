@@ -43,10 +43,10 @@ export function checkTokenInLogs(workflow, rawContent, filename) {
         line: lineNumber,
         snippet,
         context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,
-        detail: `A \`run:\` block appears to print a secret, \`GITHUB_TOKEN\`, or the full environment to stdout. GitHub Actions masks registered secret values in logs, but masking is bypassed when values are base64-encoded, URL-encoded, split across multiple echo calls, or printed before the runner registers them. \`set -x\` additionally traces every command to stdout — including any command that expands a secret variable.`,
+        detail: `A \`run:\` block appears to print a secret, \`GITHUB_TOKEN\`, or the full environment to stdout. GitHub Actions masks registered secret values in logs, but base64-encoded, URL-encoded, or split values bypass masking — and \`set -x\` traces every expanded command verbatim.`,
         exploit: `Access the workflow run's logs (public for public repos; requires read access for private repos). Search for unmasked token values or decode base64 output. For shell tracing (\`set -x\`), every command line — including those with expanded secret values — appears verbatim in the trace output.`,
         impact: 'Secret or Token Exposure via Workflow Run Logs',
-        remediation: `Never echo secrets or tokens directly. To check if a secret is set:\n\nif [ -n "\${{ secrets.MY_SECRET }}" ]; then echo "Secret is set (length \${#MY_SECRET})"; fi\n\nRemove \`set -x\` from production workflows. Remove bare \`env\` calls. For \`GITHUB_TOKEN\`, avoid echoing it entirely — check \`GITHUB_ACTIONS=true\` if you need to detect CI context.`,
+        remediation: `Never echo secrets or tokens directly. To check if a secret is set without printing it:\n\nif [ -n "\${{ secrets.MY_SECRET }}" ]; then echo "Secret is set (length \${#MY_SECRET})"; fi\n\nRemove \`set -x\` and bare \`env\` calls from production workflows. For \`GITHUB_TOKEN\`, use \`GITHUB_ACTIONS=true\` to detect CI context instead of printing the token.`,
         cvss: {
           score:  6.5,
           vector: 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N',

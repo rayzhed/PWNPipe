@@ -40,7 +40,7 @@ export function checkExcessivePermissions(workflow, rawContent, filename) {
       line: lineNumber,
       snippet,
       context: 'Workflow-level',
-      detail: `When no \`permissions:\` block is set and the repo hasn't restricted default token permissions, GITHUB_TOKEN inherits \`write\` access to contents, issues, pull-requests, packages, and more.`,
+      detail: `When no \`permissions:\` block is set and the repo hasn't restricted default token permissions, GITHUB_TOKEN defaults to write access on contents, issues, pull-requests, packages, and more.`,
       exploit: `An attacker who compromises any step in this workflow (via supply chain, template injection, or script injection) immediately gets a GITHUB_TOKEN with write access to push code, publish packages, create/modify releases, and write to issues and PRs.`,
       impact: 'Full repository write access via GITHUB_TOKEN compromise',
       remediation: `Add a least-privilege \`permissions:\` block at the top of the workflow:\n\npermissions:\n  contents: read\n\nGrant additional permissions only to the specific jobs that require them.`,

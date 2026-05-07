@@ -48,7 +48,7 @@ export function checkRunsOnInjection(workflow, rawContent, filename) {
       line:        lineNumber,
       snippet,
       context:     `Job: \`${jobName}\`  ·  runs-on: \`${runsOnStr}\``,
-      detail:      `The \`runs-on:\` label for job \`${jobId}\` is built from attacker-controlled event data (PR title, branch name, issue body). GitHub dispatches jobs to runners matching the label exactly. If an attacker controls the label, they can route the job to a self-hosted runner they registered under that label and get full access to secrets and the GITHUB_TOKEN.`,
+      detail:      `The \`runs-on:\` label for job \`${jobId}\` is built from attacker-controlled event data (PR title, branch name, issue body). GitHub dispatches jobs to runners matching that label, so an attacker who registers a self-hosted runner under the crafted label hijacks the job and reads all secrets.`,
       exploit:     `An attacker registers a self-hosted runner with a label matching the expression outcome, then submits a PR or opens an issue to set that label. The job is dispatched to their machine, which reads all secrets from the environment.`,
       impact:      'Job Hijacking via Runner Label Injection',
       remediation: `Never derive \`runs-on:\` from untrusted event data. Use a static label or a hardcoded conditional:\n\nruns-on: ubuntu-latest\n\nIf OS variants are needed, use a static strategy matrix defined in the workflow file, not from event inputs.`,

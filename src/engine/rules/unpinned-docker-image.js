@@ -34,10 +34,10 @@ export function checkUnpinnedDockerImage(workflow, rawContent, filename) {
       line: lineNumber,
       snippet,
       context: `Job: \`${jobName}\`  ·  Step ${stepIndex + 1}  ·  Tag: ${tag}`,
-      detail: `Docker image tag \`${tag}\` is mutable — it can be silently repointed to any image without touching the workflow file. If the Docker Hub account, registry, or image maintainer is compromised, the malicious image runs automatically in your pipeline with full access to secrets and GITHUB_TOKEN.`,
+      detail: `Docker image tag \`${tag}\` is mutable and can be repointed to any image without touching the workflow file. If the Docker Hub account, registry, or image maintainer is compromised, the malicious image runs automatically in your pipeline with full access to secrets and GITHUB_TOKEN.`,
       exploit: `Compromise the Docker Hub account hosting this image → push a malicious image under the same tag (\`${tag}\`) → every repo running this workflow immediately executes the payload. Unlike Git tag mutations, Docker Hub tag reassignment leaves no commit in the consuming repo's history — the attack is invisible to standard code review.`,
       impact: 'Supply Chain RCE + Full Secret Exfiltration',
-      remediation: `Pin to the image content digest instead of a mutable tag:\n\n# Get the digest:\ndocker pull ${imageRef} --quiet\ndocker inspect ${imageRef} --format='{{index .RepoDigests 0}}'\n\n# Then pin in the workflow:\nuses: docker://${imageRef.split(':')[0]}@sha256:<64-hex-chars>  # was: ${tag}\n\nUse Renovate's Docker datasource to keep the pinned digest updated automatically.`,
+      remediation: `Pin to the image content digest instead of a mutable tag. Get the digest:\n\ndocker pull ${imageRef} --quiet\ndocker inspect ${imageRef} --format='{{index .RepoDigests 0}}'\n\nThen use it in the workflow:\n\nuses: docker://${imageRef.split(':')[0]}@sha256:<64-hex-chars>  # was: ${tag}\n\nUse Renovate's Docker datasource to keep the pinned digest updated automatically.`,
       cvss: {
         score:  8.8,
         vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H',
