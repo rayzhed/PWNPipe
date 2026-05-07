@@ -133,6 +133,141 @@ const ACTION_RULES = [
 
 const SHA40_RE = /^[a-f0-9]{40}$/;
 
+// ---------------------------------------------------------------------------
+// File fetching (steps 1-5)
+// ---------------------------------------------------------------------------
+
+async function fetchAllFiles(owner, repo, token, progress) {
+  let lastRateLimit = null;
+
+  progress(1);
+  const { files, rateLimit: rl1 } = await listWorkflowFiles(owner, repo, token);
+  if (rl1) lastRateLimit = rl1;
+
+  progress(2);
+  const { files: actionFileList, rateLimit: rl2 } = await listActionFiles(owner, repo, token);
+  if (rl2) lastRateLimit = rl2;
+
+  progress(3);
+  let dependabotFile = null;
+  for (const depPath of ['.github/dependabot.yml', '.github/dependabot.yaml']) {
+    const { content: depContent, rateLimit: rl3 } = await getOptionalFileContent(owner, repo, depPath, token);
+    if (rl3) lastRateLimit = rl3;
+    if (depContent !== null) {
+      dependabotFile = { path: depPath, content: depContent, parsed: parseWorkflow(depContent) };
+      break;
+    }
+  }
+
+  progress(4);
+  let renovateFile = null;
+  for (const rPath of ['renovate.json', 'renovate.json5', '.github/renovate.json', '.github/renovate.json5']) {
+    const { content: rContent } = await getOptionalFileContent(owner, repo, rPath, token);
+    if (rContent !== null) {
+      let parsed = null;
+      try { parsed = JSON.parse(rContent); } catch { /* invalid JSON */ }
+      renovateFile = { path: rPath, content: rContent, parsed };
+      break;
+    }
+  }
+
+  let preCommitFile = null;
+  for (const pcPath of ['.pre-commit-config.yaml', '.pre-commit-config.yml']) {
+    const { content: pcContent } = await getOptionalFileContent(owner, repo, pcPath, token);
+    if (pcContent !== null) {
+      preCommitFile = { path: pcPath, content: pcContent, parsed: parseWorkflow(pcContent) };
+      break;
+    }
+  }
+
+  progress(5);
+  const workflows = [];
+  for (const file of files) {
+    const { content, rateLimit: rlWf } = await getWorkflowContent(owner, repo, file.path, token);
+    if (rlWf) lastRateLimit = rlWf;
+    const parsed = parseWorkflow(content);
+    workflows.push({ name: file.name, path: file.path, content, parsed });
+  }
+
+  const actionFiles = [];
+  for (const file of actionFileList) {
+    const { content, rateLimit: rlAf } = await getWorkflowContent(owner, repo, file.path, token);
+    if (rlAf) lastRateLimit = rlAf;
+    const parsed = parseWorkflow(content);
+    actionFiles.push({ name: file.name, path: file.path, content, parsed });
+  }
+
+  return { workflows, actionFiles, dependabotFile, renovateFile, preCommitFile, lastRateLimit };
+}
+
+// ---------------------------------------------------------------------------
+// Static rule runner (steps 6-10)
+// ---------------------------------------------------------------------------
+
+function runStaticRules(workflows, actionFiles, dependabotFile, renovateFile, preCommitFile) {
+  const findings = [];
+
+  for (const rule of WORKFLOW_RULES) {
+    for (const wf of workflows) {
+      if (!wf.parsed) continue;
+      try {
+        findings.push(...rule(wf.parsed, wf.content, wf.path));
+      } catch (err) {
+        if (import.meta.env.DEV) console.warn(`[PWNPipe] Rule ${rule.name} threw on ${wf.path}:`, err);
+      }
+    }
+  }
+
+  for (const af of actionFiles) {
+    if (!af.parsed) continue;
+    for (const rule of ACTION_RULES) {
+      try { findings.push(...rule(af.parsed, af.content, af.path)); } catch (err) {
+        if (import.meta.env.DEV) console.warn(`[PWNPipe] Action rule ${rule.name} threw on ${af.path}:`, err);
+      }
+    }
+    for (const rule of RAW_CONTENT_RULES) {
+      try { findings.push(...rule(af.parsed, af.content, af.path)); } catch (err) {
+        if (import.meta.env.DEV) console.warn(`[PWNPipe] Raw rule ${rule.name} threw on ${af.path}:`, err);
+      }
+    }
+  }
+
+  if (dependabotFile?.parsed) {
+    try {
+      findings.push(...checkDependabotInsecureExecution(dependabotFile.parsed, dependabotFile.content, dependabotFile.path));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] checkDependabotInsecureExecution threw:', err);
+    }
+    try {
+      findings.push(...checkDependabotMissingCooldown(dependabotFile.parsed, dependabotFile.content, dependabotFile.path));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] checkDependabotMissingCooldown threw:', err);
+    }
+  }
+
+  if (renovateFile?.parsed) {
+    try {
+      findings.push(...checkRenovateAutomerge(renovateFile.parsed, renovateFile.content, renovateFile.path));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] checkRenovateAutomerge threw:', err);
+    }
+  }
+
+  if (preCommitFile?.parsed) {
+    try {
+      findings.push(...checkPreCommitUnsafe(preCommitFile.parsed, preCommitFile.content, preCommitFile.path));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] checkPreCommitUnsafe threw:', err);
+    }
+  }
+
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
+// Network enrichment rules
+// ---------------------------------------------------------------------------
+
 function collectUsesRefs(workflows) {
   const refs = [];
   for (const wf of workflows) {
@@ -223,7 +358,6 @@ async function runNetworkRules(workflows, token, onProgress) {
       repoExists = result.repoExists;
     } catch { /* skip */ }
 
-    // Confirmed impostor: repo is accessible but this SHA is not in it
     if (exists === false) {
       for (const r of shaGroup) {
         const lineNumber = findLineNumber(r.rawContent, r.ref.slice(0, 20));
@@ -247,10 +381,8 @@ async function runNetworkRules(workflows, token, onProgress) {
       continue;
     }
 
-    // Unverifiable: repo returned 404 — deleted, renamed, or private.
-    // The old name may be available for registration (name-squatting risk).
+    // Unverifiable: repo returned 404 — deleted, renamed, or private
     if (repoExists === false) {
-      // Deduplicate to one finding per ownerRepo — all steps share the same root risk
       const r = shaGroup[0];
       const lineNumber = findLineNumber(r.rawContent, r.ref.slice(0, 20));
       const snippet    = extractSnippet(r.rawContent, lineNumber, 4);
@@ -336,234 +468,9 @@ async function runNetworkRules(workflows, token, onProgress) {
   return findings;
 }
 
-/**
- * Main scan orchestrator.
- */
-export async function scanRepository(owner, repo, token, onProgress = () => {}) {
-  const steps = [
-    'Connecting to GitHub API',
-    'Fetching workflow files',
-    'Fetching action files',
-    'Fetching dependabot config',
-    'Fetching renovate / pre-commit config',
-    'Parsing YAML',
-    'Checking dangerous triggers',
-    'Detecting template injections',
-    'Verifying action pinning',
-    'Auditing GITHUB_TOKEN permissions',
-    'Running additional checks',
-    'Network enrichment checks',
-    'Checking repository security settings',
-    'Calculating risk score',
-  ];
-
-  let lastRateLimit = null;
-
-  function progress(stepIndex) {
-    onProgress({ step: stepIndex, label: steps[stepIndex], total: steps.length });
-  }
-
-  progress(0);
-
-  // Step 1: workflow files
-  progress(1);
-  const { files, rateLimit: rl1 } = await listWorkflowFiles(owner, repo, token);
-  if (rl1) lastRateLimit = rl1;
-
-  // Step 2: action files
-  progress(2);
-  const { files: actionFileList, rateLimit: rl2 } = await listActionFiles(owner, repo, token);
-  if (rl2) lastRateLimit = rl2;
-
-  // Step 3: dependabot config (.yml preferred, .yaml fallback)
-  progress(3);
-  let dependabotFile = null;
-  for (const depPath of ['.github/dependabot.yml', '.github/dependabot.yaml']) {
-    const { content: depContent, rateLimit: rl3 } = await getOptionalFileContent(owner, repo, depPath, token);
-    if (rl3) lastRateLimit = rl3;
-    if (depContent !== null) {
-      dependabotFile = { path: depPath, content: depContent, parsed: parseWorkflow(depContent) };
-      break;
-    }
-  }
-
-  // Step 4: renovate + pre-commit configs
-  progress(4);
-  let renovateFile = null;
-  for (const rPath of ['renovate.json', 'renovate.json5', '.github/renovate.json', '.github/renovate.json5']) {
-    const { content: rContent } = await getOptionalFileContent(owner, repo, rPath, token);
-    if (rContent !== null) {
-      let parsed = null;
-      try { parsed = JSON.parse(rContent); } catch { /* invalid JSON */ }
-      renovateFile = { path: rPath, content: rContent, parsed };
-      break;
-    }
-  }
-
-  let preCommitFile = null;
-  for (const pcPath of ['.pre-commit-config.yaml', '.pre-commit-config.yml']) {
-    const { content: pcContent } = await getOptionalFileContent(owner, repo, pcPath, token);
-    if (pcContent !== null) {
-      preCommitFile = { path: pcPath, content: pcContent, parsed: parseWorkflow(pcContent) };
-      break;
-    }
-  }
-
-  if (files.length === 0 && actionFileList.length === 0 && !dependabotFile && !renovateFile && !preCommitFile) {
-    return {
-      owner, repo,
-      workflows: [],
-      actionFiles: [],
-      dependabotFile: null,
-      renovateFile: null,
-      preCommitFile: null,
-      securityInfo: null,
-      findings: [],
-      rateLimit: lastRateLimit,
-      scannedAt: new Date().toISOString(),
-      noWorkflows: true,
-    };
-  }
-
-  // Step 5: fetch and parse workflow files
-  progress(5);
-  const workflows = [];
-  for (const file of files) {
-    const { content, rateLimit: rlWf } = await getWorkflowContent(owner, repo, file.path, token);
-    if (rlWf) lastRateLimit = rlWf;
-    const parsed = parseWorkflow(content);
-    workflows.push({ name: file.name, path: file.path, content, parsed });
-  }
-
-  // Fetch and parse action files
-  const actionFiles = [];
-  for (const file of actionFileList) {
-    const { content, rateLimit: rlAf } = await getWorkflowContent(owner, repo, file.path, token);
-    if (rlAf) lastRateLimit = rlAf;
-    const parsed = parseWorkflow(content);
-    actionFiles.push({ name: file.name, path: file.path, content, parsed });
-  }
-
-  // Steps 6-11: static rules on workflow files
-  const findings = [];
-
-  for (let ri = 0; ri < WORKFLOW_RULES.length; ri++) {
-    const progressStep = Math.min(6 + Math.floor(ri / 5), 10);
-    progress(progressStep);
-
-    const rule = WORKFLOW_RULES[ri];
-    for (const wf of workflows) {
-      if (!wf.parsed) continue;
-      try {
-        findings.push(...rule(wf.parsed, wf.content, wf.path));
-      } catch (err) {
-        if (import.meta.env.DEV) console.warn(`[PWNPipe] Rule ${rule.name} threw on ${wf.path}:`, err);
-      }
-    }
-  }
-
-  // Action-specific rules
-  for (const af of actionFiles) {
-    if (!af.parsed) continue;
-    for (const rule of ACTION_RULES) {
-      try { findings.push(...rule(af.parsed, af.content, af.path)); } catch (err) {
-        if (import.meta.env.DEV) console.warn(`[PWNPipe] Action rule ${rule.name} threw on ${af.path}:`, err);
-      }
-    }
-    for (const rule of RAW_CONTENT_RULES) {
-      try { findings.push(...rule(af.parsed, af.content, af.path)); } catch (err) {
-        if (import.meta.env.DEV) console.warn(`[PWNPipe] Raw rule ${rule.name} threw on ${af.path}:`, err);
-      }
-    }
-  }
-
-  // Dependabot rules
-  if (dependabotFile?.parsed) {
-    try {
-      findings.push(...checkDependabotInsecureExecution(dependabotFile.parsed, dependabotFile.content, dependabotFile.path));
-    } catch (err) {
-      if (import.meta.env.DEV) console.warn('[PWNPipe] checkDependabotInsecureExecution threw:', err);
-    }
-    try {
-      findings.push(...checkDependabotMissingCooldown(dependabotFile.parsed, dependabotFile.content, dependabotFile.path));
-    } catch (err) {
-      if (import.meta.env.DEV) console.warn('[PWNPipe] checkDependabotMissingCooldown threw:', err);
-    }
-  }
-
-  // Renovate rules
-  if (renovateFile?.parsed) {
-    try {
-      findings.push(...checkRenovateAutomerge(renovateFile.parsed, renovateFile.content, renovateFile.path));
-    } catch (err) {
-      if (import.meta.env.DEV) console.warn('[PWNPipe] checkRenovateAutomerge threw:', err);
-    }
-  }
-
-  // Pre-commit rules
-  if (preCommitFile?.parsed) {
-    try {
-      findings.push(...checkPreCommitUnsafe(preCommitFile.parsed, preCommitFile.content, preCommitFile.path));
-    } catch (err) {
-      if (import.meta.env.DEV) console.warn('[PWNPipe] checkPreCommitUnsafe threw:', err);
-    }
-  }
-
-  // Step 11: network enrichment (existing: archived, impostor, mismatch)
-  progress(11);
-  try {
-    const networkFindings = await runNetworkRules(
-      workflows,
-      token,
-      (label) => onProgress({ step: 11, label, total: steps.length }),
-    );
-    findings.push(...networkFindings);
-  } catch (err) {
-    if (import.meta.env.DEV) console.warn('[PWNPipe] runNetworkRules threw:', err);
-  }
-
-  // Step 12: repository security settings check
-  progress(12);
-  let securityInfo = null;
-  if (token) {
-    try {
-      securityInfo = await getRepositorySecurityInfo(owner, repo, token);
-      if (securityInfo.rateLimit) lastRateLimit = securityInfo.rateLimit;
-
-      const secFindings = buildSecurityInfoFindings(owner, repo, securityInfo);
-      findings.push(...secFindings);
-    } catch (err) {
-      if (import.meta.env.DEV) console.warn('[PWNPipe] getRepositorySecurityInfo threw:', err);
-    }
-  }
-
-  // Attach OWASP + confidence to every finding
-  for (const f of findings) {
-    const meta = RULE_META[f.rule];
-    if (!meta) continue;
-    f.owasp      = meta.owasp ?? null;
-    f.confidence = typeof meta.confidence === 'function'
-      ? meta.confidence(f)
-      : (meta.confidence ?? 'MEDIUM');
-  }
-
-  progress(13);
-
-  return {
-    owner,
-    repo,
-    workflows,
-    actionFiles,
-    dependabotFile,
-    renovateFile,
-    preCommitFile,
-    securityInfo,
-    findings,
-    rateLimit: lastRateLimit,
-    scannedAt: new Date().toISOString(),
-    noWorkflows: files.length === 0,
-  };
-}
+// ---------------------------------------------------------------------------
+// Repository security info findings
+// ---------------------------------------------------------------------------
 
 function buildSecurityInfoFindings(owner, repo, info) {
   const findings = [];
@@ -622,7 +529,106 @@ function buildSecurityInfoFindings(owner, repo, info) {
     });
   }
 
-
-
   return findings;
+}
+
+// ---------------------------------------------------------------------------
+// Main scan orchestrator
+// ---------------------------------------------------------------------------
+
+export async function scanRepository(owner, repo, token, onProgress = () => {}) {
+  const steps = [
+    'Connecting to GitHub API',
+    'Fetching workflow files',
+    'Fetching action files',
+    'Fetching dependabot config',
+    'Fetching renovate / pre-commit config',
+    'Parsing YAML',
+    'Checking dangerous triggers',
+    'Detecting template injections',
+    'Verifying action pinning',
+    'Auditing GITHUB_TOKEN permissions',
+    'Running additional checks',
+    'Network enrichment checks',
+    'Checking repository security settings',
+    'Calculating risk score',
+  ];
+
+  function progress(stepIndex) {
+    onProgress({ step: stepIndex, label: steps[stepIndex], total: steps.length });
+  }
+
+  progress(0);
+  const fetched = await fetchAllFiles(owner, repo, token, progress);
+  let lastRateLimit = fetched.lastRateLimit;
+  const { workflows, actionFiles, dependabotFile, renovateFile, preCommitFile } = fetched;
+
+  if (workflows.length === 0 && actionFiles.length === 0 && !dependabotFile && !renovateFile && !preCommitFile) {
+    return {
+      owner, repo,
+      workflows: [],
+      actionFiles: [],
+      dependabotFile: null,
+      renovateFile: null,
+      preCommitFile: null,
+      securityInfo: null,
+      findings: [],
+      rateLimit: lastRateLimit,
+      scannedAt: new Date().toISOString(),
+      noWorkflows: true,
+    };
+  }
+
+  progress(6);
+  const findings = runStaticRules(workflows, actionFiles, dependabotFile, renovateFile, preCommitFile);
+
+  progress(11);
+  try {
+    const networkFindings = await runNetworkRules(
+      workflows,
+      token,
+      (label) => onProgress({ step: 11, label, total: steps.length }),
+    );
+    findings.push(...networkFindings);
+  } catch (err) {
+    if (import.meta.env.DEV) console.warn('[PWNPipe] runNetworkRules threw:', err);
+  }
+
+  progress(12);
+  let securityInfo = null;
+  if (token) {
+    try {
+      securityInfo = await getRepositorySecurityInfo(owner, repo, token);
+      if (securityInfo.rateLimit) lastRateLimit = securityInfo.rateLimit;
+      findings.push(...buildSecurityInfoFindings(owner, repo, securityInfo));
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[PWNPipe] getRepositorySecurityInfo threw:', err);
+    }
+  }
+
+  for (const f of findings) {
+    const meta = RULE_META[f.rule];
+    if (!meta) continue;
+    f.owasp      = meta.owasp ?? null;
+    f.confidence = typeof meta.confidence === 'function'
+      ? meta.confidence(f)
+      : (meta.confidence ?? 'MEDIUM');
+  }
+
+  progress(13);
+
+  return {
+    owner,
+    repo,
+    workflows,
+    actionFiles,
+    dependabotFile,
+    renovateFile,
+    preCommitFile,
+    securityInfo,
+    findings,
+    rateLimit: lastRateLimit,
+    scannedAt: new Date().toISOString(),
+    noWorkflows: workflows.length === 0,
+  };
 }
