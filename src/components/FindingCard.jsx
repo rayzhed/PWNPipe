@@ -296,7 +296,7 @@ export default function FindingCard({ group, informational = false }) {
               <div className="flex items-start gap-2 rounded-md border border-border/40 bg-muted/20 px-3 py-2">
                 <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
                 <p className="font-mono text-[11px] text-muted-foreground/60 leading-relaxed">
-                  This finding has <span className="font-semibold">{rep.confidence}</span> confidence — it does not affect the risk score and may require manual verification.
+                  <span className="font-semibold">{rep.confidence}</span> confidence — not counted in the score, verify manually.
                 </p>
               </div>
             )}
